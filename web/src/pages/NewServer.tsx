@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Check, Coffee, Gamepad2, Globe2, HardDriveDownload, Search, Sparkles } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useServers } from '../hooks/useServers';
 import { api } from '../lib/api';
@@ -9,6 +9,8 @@ import { fmtMb } from '../lib/format';
 import { JAVA_TYPES, TYPE_BLURB, TYPE_LABEL, type BackupMeta, type Edition, type JavaType, type ServerType, type SystemInfo } from '../lib/types';
 import { Field, Segmented, Spinner, Toggle } from '../components/ui';
 import { useToast } from '../components/Toast';
+import { fmtBytes } from '../lib/format';
+import { FolderOpen, Trash2, Upload } from 'lucide-react';
 
 type Step = 0 | 1 | 2;
 
@@ -27,6 +29,8 @@ interface Form {
   restartOnCrash: boolean;
   startAfterInstall: boolean;
   worldMode: 'new' | 'import';
+  importSource: 'server' | 'upload' | 'folder' | 'existing';
+  importId: string;
   sourceServerId: string;
   backupId: string;
   levelName: string;
@@ -73,6 +77,8 @@ export function NewServer() {
       restartOnCrash: true,
       startAfterInstall: true,
       worldMode: source ? 'import' : 'new',
+      importSource: 'server',
+      importId: '',
       sourceServerId: source,
       backupId: '',
       levelName: '',
@@ -122,9 +128,63 @@ export function NewServer() {
     enabled: !!f.sourceServerId,
   });
 
+  interface WorldImport { id: string; name: string; edition: Edition; levelName: string; bytes: number; createdAt: string; source: string; hasNether?: boolean; hasEnd?: boolean }
+  interface ImportsView { imports: WorldImport[]; folders: { name: string; edition: Edition | null; levelName: string | null }[] }
+  const imports = useQuery({ queryKey: ['imports'], queryFn: () => api.get<ImportsView>('/api/imports'), enabled: f.worldMode === 'import' });
+  const [uploading, setUploading] = useState<string | null>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
+  const dirRef = useRef<HTMLInputElement>(null);
+  const selectedImport = imports.data?.imports.find((i) => i.id === f.importId);
+
+  const uploadWorld = async (files: FileList | null, folder: boolean) => {
+    if (!files?.length) return;
+    const fd = new FormData();
+    let total = 0;
+    for (const file of Array.from(files)) {
+      total += file.size;
+      fd.append('files', file, folder ? (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name : file.name);
+    }
+    setUploading(`Uploading ${files.length} file${files.length > 1 ? 's' : ''} (${fmtBytes(total)})…`);
+    try {
+      const res = await fetch('/api/imports/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Upload failed');
+      toast.success(`Imported ${data.name} (${data.edition} world "${data.levelName}")`);
+      await imports.refetch();
+      set('importId', data.id);
+      if (data.edition !== f.edition) toast.error(`This is a ${data.edition} world; switch the server type to match before creating`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setUploading(null);
+      if (zipRef.current) zipRef.current.value = '';
+      if (dirRef.current) dirRef.current.value = '';
+    }
+  };
+  const registerFolder = async (folder: string) => {
+    try {
+      const data = await api.post<WorldImport>('/api/imports/register', { folder });
+      toast.success(`Registered ${data.name}`);
+      await imports.refetch();
+      set('importId', data.id);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+  const deleteImport = async (id: string) => {
+    if (!confirm('Delete this imported world? Servers already created from it are not affected.')) return;
+    try {
+      await api.del(`/api/imports/${id}`);
+      if (f.importId === id) set('importId', '');
+      imports.refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const chooseType = (type: ServerType) => {
     const edition: Edition = type === 'BEDROCK' ? 'bedrock' : 'java';
-    setF((x) => ({ ...x, type, edition, version: '', geyser: GEYSER_OK.includes(type) ? x.geyser : false, sourceServerId: x.edition === edition ? x.sourceServerId : '', worldMode: x.edition === edition ? x.worldMode : 'new' }));
+    setF((x) => ({ ...x, type, edition, version: '', geyser: GEYSER_OK.includes(type) ? x.geyser : false, sourceServerId: x.edition === edition ? x.sourceServerId : '', worldMode: x.edition === edition ? x.worldMode : 'new', importId: x.edition === edition ? x.importId : '' }));
     setVersionQuery('');
   };
 
@@ -159,7 +219,7 @@ export function NewServer() {
         type: f.type,
         version: f.version,
         port: f.port ? Number(f.port) : undefined,
-        levelName: f.worldMode === 'import' ? undefined : f.levelName || undefined,
+        levelName: f.worldMode === 'import' && f.importSource === 'server' ? undefined : f.levelName || undefined,
         java: isJava ? { xmxMb: f.xmxMb, xmsMb: f.xmxMb, major: f.javaMajor, preset: f.preset, extraArgs: '' } : undefined,
         properties,
         geyser: f.geyser,
@@ -167,7 +227,16 @@ export function NewServer() {
         autoStart: f.autoStart,
         restartOnCrash: f.restartOnCrash,
         startAfterInstall: f.startAfterInstall,
-        importWorld: f.worldMode === 'import' && f.sourceServerId ? { sourceServerId: f.sourceServerId, backupId: f.backupId || undefined } : undefined,
+        importWorld:
+          f.worldMode !== 'import'
+            ? undefined
+            : f.importSource === 'server'
+              ? f.sourceServerId
+                ? { sourceServerId: f.sourceServerId, backupId: f.backupId || undefined }
+                : undefined
+              : f.importId
+                ? { importId: f.importId }
+                : undefined,
       });
       toast.success('Server created — installing now');
       nav(`/servers/${r.id}`);
@@ -386,30 +455,124 @@ export function NewServer() {
               </>
             ) : (
               <>
-                <Field label={`Source server (${isJava ? 'Java' : 'Bedrock'})`} hint="The source server's world is copied; the original is left untouched. Running servers are snapshotted safely first.">
-                  <select className="input" value={f.sourceServerId} onChange={(e) => { set('sourceServerId', e.target.value); set('backupId', ''); }}>
-                    <option value="">Select a server…</option>
-                    {sameEdition.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} — {TYPE_LABEL[s.type]} {s.version}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                {!sameEdition.length && <p className="text-xs text-amber-300">No {isJava ? 'Java' : 'Bedrock'} servers to import from. Worlds cannot be converted between editions.</p>}
-                {source && (
-                  <Field label="Snapshot" hint="Use the live world or one of the source server's backups.">
-                    <select className="input" value={f.backupId} onChange={(e) => set('backupId', e.target.value)}>
-                      <option value="">Current world ({source.levelName})</option>
-                      {backups.data?.backups.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          Backup: {b.label} · {new Date(b.createdAt).toLocaleString()} · {b.version}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                <Segmented
+                  className="flex-wrap"
+                  value={f.importSource}
+                  onChange={(v) => set('importSource', v)}
+                  options={[
+                    { value: 'server', label: 'Another server' },
+                    { value: 'upload', label: 'Upload .zip / .mcworld' },
+                    { value: 'folder', label: 'Upload folder' },
+                    { value: 'existing', label: 'On the server' },
+                  ]}
+                />
+                {f.importSource === 'server' && (
+                  <>
+                    <Field label={`Source server (${isJava ? 'Java' : 'Bedrock'})`} hint="The source server's world is copied; the original is left untouched. Running servers are snapshotted safely first.">
+                      <select className="input" value={f.sourceServerId} onChange={(e) => { set('sourceServerId', e.target.value); set('backupId', ''); }}>
+                        <option value="">Select a server…</option>
+                        {sameEdition.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} — {TYPE_LABEL[s.type]} {s.version}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    {!sameEdition.length && <p className="text-xs text-amber-300">No {isJava ? 'Java' : 'Bedrock'} servers to import from. Worlds cannot be converted between editions.</p>}
+                    {source && (
+                      <Field label="Snapshot" hint="Use the live world or one of the source server's backups.">
+                        <select className="input" value={f.backupId} onChange={(e) => set('backupId', e.target.value)}>
+                          <option value="">Current world ({source.levelName})</option>
+                          {backups.data?.backups.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              Backup: {b.label} · {new Date(b.createdAt).toLocaleString()} · {b.version}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    )}
+                    {source && isJava && source.type !== f.type && <p className="text-xs text-muted">Switching from {TYPE_LABEL[source.type]} to {TYPE_LABEL[f.type]}: worlds carry over, but plugins/mods and their data do not.</p>}
+                  </>
                 )}
-                {source && isJava && source.type !== f.type && <p className="text-xs text-muted">Switching from {TYPE_LABEL[source.type]} to {TYPE_LABEL[f.type]}: worlds carry over, but plugins/mods and their data do not.</p>}
+                {f.importSource === 'upload' && (
+                  <div className="space-y-2">
+                    <input ref={zipRef} type="file" accept=".zip,.mcworld" className="hidden" onChange={(e) => uploadWorld(e.target.files, false)} />
+                    <button type="button" className="btn-secondary w-full" disabled={!!uploading} onClick={() => zipRef.current?.click()}>
+                      {uploading ? <Spinner /> : <Upload className="size-4" />} {uploading || 'Choose a .zip or .mcworld'}
+                    </button>
+                    <p className="text-xs text-muted">{isJava ? 'A zipped world folder (the one containing level.dat and region/). Paper-style world_nether / world_the_end folders next to it are picked up too.' : 'A .mcworld export from the game, or a zipped world folder (level.dat + db/).'}</p>
+                  </div>
+                )}
+                {f.importSource === 'folder' && (
+                  <div className="space-y-2">
+                    <input ref={dirRef} type="file" className="hidden" {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} multiple onChange={(e) => uploadWorld(e.target.files, true)} />
+                    <button type="button" className="btn-secondary w-full" disabled={!!uploading} onClick={() => dirRef.current?.click()}>
+                      {uploading ? <Spinner /> : <FolderOpen className="size-4" />} {uploading || 'Choose a world folder'}
+                    </button>
+                    <p className="text-xs text-muted">Uploads every file in the folder. For very large worlds, zip it first or copy it to the server's data/imports directory and use "On the server".</p>
+                  </div>
+                )}
+                {f.importSource === 'existing' && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted">
+                      Copy a world folder (or a .zip / .mcworld) into <span className="font-mono text-ink">data/imports/</span> on the host, then register it here.
+                    </p>
+                    {imports.data?.folders.length ? (
+                      <ul className="divide-y divide-line/60 rounded-xl border border-line">
+                        {imports.data.folders.map((d) => (
+                          <li key={d.name} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                            <span className="min-w-0 truncate font-mono text-xs">
+                              {d.name}
+                              <span className="ml-2 text-muted">{d.edition ? `${d.edition} · ${d.levelName}` : 'no level.dat found'}</span>
+                            </span>
+                            <button type="button" className="btn-secondary btn-sm" disabled={!d.edition && !/\.(zip|mcworld)$/i.test(d.name)} onClick={() => registerFolder(d.name)}>
+                              Register
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted">Nothing new found in data/imports.</p>
+                    )}
+                  </div>
+                )}
+                {f.importSource !== 'server' && (
+                  <div className="space-y-2 border-t border-line pt-3">
+                    <span className="label">Imported worlds</span>
+                    {imports.isLoading ? (
+                      <Spinner />
+                    ) : imports.data?.imports.length ? (
+                      <ul className="divide-y divide-line/60 rounded-xl border border-line">
+                        {imports.data.imports.map((w) => {
+                          const mismatch = w.edition !== f.edition;
+                          return (
+                            <li key={w.id} className={clsx('flex items-center gap-3 px-3 py-2 text-sm', f.importId === w.id && 'bg-accent/[0.08]')}>
+                              <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" disabled={mismatch} onClick={() => set('importId', w.id)} title={mismatch ? `This is a ${w.edition} world` : undefined}>
+                                <span className={clsx('size-2 shrink-0 rounded-full', f.importId === w.id ? 'bg-accent' : 'bg-white/20')} />
+                                <span className="min-w-0">
+                                  <span className={clsx('block truncate font-medium', mismatch && 'opacity-50')}>{w.name}</span>
+                                  <span className="block truncate text-xs text-muted">
+                                    {w.edition} · level "{w.levelName}" · {fmtBytes(w.bytes)}{w.hasNether ? ' · nether' : ''}{w.hasEnd ? ' · end' : ''}
+                                  </span>
+                                </span>
+                              </button>
+                              <button type="button" className="btn-ghost btn-sm text-rose-300" onClick={() => deleteImport(w.id)}>
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted">No imported worlds yet.</p>
+                    )}
+                    {selectedImport && (
+                      <Field label="Level name" hint={isJava ? 'Folder name the world is copied to.' : 'Folder under worlds/ and the level-name property.'}>
+                        <input className="input" placeholder={selectedImport.levelName} value={f.levelName} onChange={(e) => set('levelName', e.target.value)} />
+                      </Field>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -458,7 +621,7 @@ export function NewServer() {
             Continue <ArrowRight className="size-4" />
           </button>
         ) : (
-          <button className="btn-primary" disabled={busy || (f.worldMode === 'import' && !f.sourceServerId)} onClick={create}>
+          <button className="btn-primary" disabled={busy || (f.worldMode === 'import' && (f.importSource === 'server' ? !f.sourceServerId : !f.importId))} onClick={create}>
             {busy && <Spinner />} Create {TYPE_LABEL[f.type]} {f.version && isJava ? f.version : ''} server
           </button>
         )}

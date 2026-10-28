@@ -13,6 +13,7 @@ import { pingBedrock, pingJava, probeNetherNet } from './status.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
 import { JAVA_TYPES } from './types.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
+import { applyImport, getImport } from '../imports.js';
 
 const ALL_TYPES: ServerType[] = [...JAVA_TYPES, 'BEDROCK'];
 
@@ -167,7 +168,11 @@ export class ServerManager {
     if (!input.version?.trim()) throw bad('Version is required');
 
     let source: ServerInstance | null = null;
-    if (input.importWorld?.sourceServerId) {
+    let importMeta: Awaited<ReturnType<typeof getImport>> | null = null;
+    if (input.importWorld?.importId) {
+      importMeta = await getImport(input.importWorld.importId);
+      if (importMeta.edition !== edition) throw bad(`That import is a ${importMeta.edition} world; pick a ${importMeta.edition === 'java' ? 'Java' : 'Bedrock'} server type or another world`);
+    } else if (input.importWorld?.sourceServerId) {
       source = this.get(input.importWorld.sourceServerId);
       if (source.rec.edition !== edition) throw bad('Worlds can only be imported between servers of the same edition');
     }
@@ -180,7 +185,7 @@ export class ServerManager {
       port = input.port;
     } else port = this.allocatePort(edition, undefined, edition === 'bedrock' ? 2 : 1);
 
-    const levelName = (input.levelName?.trim() || (source ? source.rec.levelName : edition === 'bedrock' ? 'Bedrock level' : 'world')).replace(/[\\/:*?"<>|]/g, '_');
+    const levelName = (input.levelName?.trim() || (importMeta ? importMeta.levelName : source ? source.rec.levelName : edition === 'bedrock' ? 'Bedrock level' : 'world')).replace(/[\\/:*?"<>|]/g, '_');
     const now = new Date().toISOString();
     const java: JavaSettings | undefined =
       edition === 'java'
@@ -224,16 +229,19 @@ export class ServerManager {
     bus.publish({ type: 'server.changed', id });
 
     // Install asynchronously; the UI follows progress over the websocket.
-    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall).catch(() => {});
+    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall, importMeta?.id).catch(() => {});
     return inst.summary();
   }
 
-  private async installAndMaybeStart(inst: ServerInstance, props: Record<string, string> | undefined, source: ServerInstance | null, backupId: string | undefined, startAfter: boolean) {
+  private async installAndMaybeStart(inst: ServerInstance, props: Record<string, string> | undefined, source: ServerInstance | null, backupId: string | undefined, startAfter: boolean, importId?: string) {
     inst.setState('installing');
     inst.setProgress(null, 'Preparing');
     try {
       await this.doInstall(inst, props);
-      if (source) await this.importWorld(inst, source, backupId);
+      if (importId) {
+        inst.setProgress(null, 'Copying imported world');
+        await applyImport(importId, inst.root, inst.rec.edition, inst.rec.levelName);
+      } else if (source) await this.importWorld(inst, source, backupId);
       inst.rec.installed = true;
       await inst.save();
       inst.install = null;

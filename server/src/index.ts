@@ -21,7 +21,8 @@ async function main() {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' }, bodyLimit: 10 * 1024 * 1024, trustProxy: true });
 
   await app.register(cookie);
-  await app.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 1 } });
+  // preservePath keeps "folder/sub/file" names for folder uploads (world imports); other routes basename() what they need.
+  await app.register(multipart, { limits: { fileSize: 4 * 1024 * 1024 * 1024, files: 50_000 }, preservePath: true } as any);
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
   app.setErrorHandler((err: any, _req, reply) => {

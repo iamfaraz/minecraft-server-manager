@@ -112,6 +112,6 @@ export interface CreateServerInput {
   transport?: BedrockTransport;
   autoStart?: boolean;
   restartOnCrash?: boolean;
-  importWorld?: { sourceServerId: string; backupId?: string };
+  importWorld?: { sourceServerId?: string; backupId?: string; importId?: string };
   startAfterInstall?: boolean;
 }

@@ -5,6 +5,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **One container.** The manager, every Minecraft server process, the Java runtimes and the playit.gg agent all live in one container with one data volume.
 - **Java flavors:** Vanilla, Paper, Purpur, Fabric, Forge, NeoForge. **Bedrock:** official Bedrock Dedicated Server (release or preview). Version catalogs come straight from Mojang, PaperMC, PurpurMC, FabricMC, Forge and NeoForge.
 - **Correct Java every time.** The required Java major is read from Mojang's version metadata (e.g. 26.x → Java 25, 1.21 → 21, 1.20.4 → 17, ≤1.16 → 8). Java 21 and 25 are bundled; other versions download from Adoptium on demand. Override per server if you want.
+- **Import any world.** Upload a `.zip`/`.mcworld`, upload a folder from your browser, or drop a world into `data/imports/` on the host, then create a new server from it. Java and Bedrock worlds are detected automatically (including Paper-style nether/end folders).
 - **Update in place or branch off.** Change a server's version/flavor while keeping its world, configs, plugins and mods (a world backup is taken first), or create a brand-new server on another version and import the world from an existing server or one of its backups.
 - **Safe hot backups.** Running servers are frozen through the proper console pipeline (`save-off`/`save-all flush` on Java, `save hold`/`save query` with byte-exact truncation on Bedrock) so backups are consistent without kicking anyone. Manual and scheduled, with retention.
 - **Live console** (stdin/stdout, no RCON needed), **telemetry** (CPU, memory, players, ping via Server List Ping / RakNet), **player management** (whitelist/allowlist, ops, bans, kicks; Mojang UUID lookup; offline-mode UUIDs), **addons** (Modrinth search + one-click install with dependencies for plugins/mods; `.mcpack`/`.mcaddon` install for Bedrock), **jailed file manager** with editor, and a **server.properties** editor.
@@ -106,7 +107,7 @@ Publish a new version yourself:
 ./publish.sh 0.2.0      # explicit tag
 ```
 
-The GitHub Actions workflow in `.github/workflows/docker-publish.yml` does the same on every push to `main` and on `v*` tags; add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets to the repo (and optionally a `DOCKERHUB_IMAGE` variable) to enable it.
+The GitHub Actions workflow in `.github/workflows/docker-publish.yml` does the same **on demand**: Actions → *Publish Docker image* → *Run workflow* (optional tag and platform inputs). It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets (and optionally a `DOCKERHUB_IMAGE` variable).
 
 ## Development
 

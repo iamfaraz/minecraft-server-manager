@@ -1,10 +1,17 @@
 name: Publish Docker image
 
+# Manual only: Actions → "Publish Docker image" → Run workflow.
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (also tags :latest)'
+        required: false
+        default: ''
+      platforms:
+        description: 'Target platforms'
+        required: false
+        default: 'linux/amd64,linux/arm64'
 
 env:
   IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'imfaraz/minecraft-server-manager' }}
@@ -23,23 +30,22 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=sha,prefix=sha-
-      - name: Build and push (linux/amd64 + linux/arm64)
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="$(node -p "require('./server/package.json').version")"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event.inputs.platforms }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: MCSM_VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          build-args: MCSM_VERSION=${{ steps.tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

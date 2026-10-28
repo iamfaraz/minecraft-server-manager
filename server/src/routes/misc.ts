@@ -10,6 +10,7 @@ import { bedrockSupport, listJavaRuntimes } from '../versions/runtime.js';
 import { JAVA_TYPES, type JavaType } from '../servers/types.js';
 import { bad } from '../util.js';
 import { playit } from '../playit.js';
+import { deleteImport, importFromServerFolder, importFromUpload, listImports, unregisteredFolders } from '../imports.js';
 
 async function cgroupMemoryLimit(): Promise<number | null> {
   for (const f of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
@@ -60,6 +61,15 @@ export async function miscRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/versions/bedrock', async () => bedrockVersions());
+
+  /* ---------------- World imports ---------------- */
+  app.get('/api/imports', async () => ({ imports: await listImports(), folders: await unregisteredFolders() }));
+  app.post('/api/imports/upload', async (req) => importFromUpload(req));
+  app.post<{ Body: { folder: string; name?: string } }>('/api/imports/register', async (req) => importFromServerFolder(req.body?.folder || '', req.body?.name));
+  app.delete<{ Params: { id: string } }>('/api/imports/:id', async (req) => {
+    await deleteImport(req.params.id);
+    return { ok: true };
+  });
 
   app.get('/api/playit', async () => {
     if (playit.status().state === 'running') await playit.refreshTunnels();
