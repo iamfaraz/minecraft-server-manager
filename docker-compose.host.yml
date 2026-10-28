@@ -1,0 +1,10 @@
+# Linux-only override: run on the host network so Bedrock LAN discovery (Friends tab) and NetherNet/WebRTC
+# work without NAT tricks, and server ports no longer need to be published in advance.
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+# deploy.sh enables this automatically on Linux by writing COMPOSE_FILE into .env.
+services:
+  blockhost:
+    network_mode: host
+    ports: !reset []
+    environment:
+      MCSM_HOST_NETWORK: "1"

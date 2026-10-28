@@ -29,6 +29,9 @@ export const config = {
   inDocker,
   javaPorts: parseRange(process.env.MCSM_JAVA_PORTS || '25565-25574', [25565, 25574]),
   bedrockPorts: parseRange(process.env.MCSM_BEDROCK_PORTS || '19132-19141', [19132, 19141]),
+  /** LAN/public IP that NetherNet (WebRTC) Bedrock servers advertise to clients; needed when the container is NAT'd (bridge network). */
+  advertiseIp: (process.env.MCSM_ADVERTISE_IP || '').trim(),
+  hostNetwork: !!process.env.MCSM_HOST_NETWORK,
   playitBin: process.env.MCSM_PLAYIT_BIN || '',
   playitArgs: process.env.MCSM_PLAYIT_ARGS || '',
   /** Where the built web UI lives (served in production). */

@@ -20,6 +20,8 @@ services:
       PGID: "${PGID:-1000}"
       MCSM_JAVA_PORTS: "${MCSM_JAVA_PORTS:-25565-25574}"
       MCSM_BEDROCK_PORTS: "${MCSM_BEDROCK_PORTS:-19132-19141}"
+      # LAN/public IP that NetherNet Bedrock servers advertise to clients (needed on bridge networking). deploy.sh fills it in.
+      MCSM_ADVERTISE_IP: "${MCSM_ADVERTISE_IP:-}"
       # Seconds a server gets to save after "stop" before it is force-killed
       MCSM_STOP_TIMEOUT_MS: "60000"
     volumes:

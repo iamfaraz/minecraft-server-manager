@@ -45,6 +45,8 @@ export interface ServerRecord {
   portV6?: number;
   /** Bedrock network transport. RakNet is the classic UDP protocol; NetherNet is Mojang's WebRTC transport (BDS default since 2025). */
   transport?: BedrockTransport;
+  /** Overrides MCSM_ADVERTISE_IP for this server's NetherNet WebRTC candidates. */
+  advertiseIp?: string;
   levelName: string;
   java?: JavaSettings;
   autoStart: boolean;

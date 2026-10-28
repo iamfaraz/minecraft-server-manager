@@ -128,6 +128,23 @@ if [ -z "$(env_get MCSM_MEMORY_LIMIT)" ] || [ "$(env_get MCSM_MEMORY_LIMIT)" = "
 fi
 ok "Container memory limit: $(env_get MCSM_MEMORY_LIMIT)"
 
+# Advertised IP: what players type into "Add Server". NetherNet (WebRTC) Bedrock servers must announce it.
+LAN_IP="$( (hostname -I 2>/dev/null || ipconfig getifaddr en0 2>/dev/null || true) | awk '{print $1}')"
+if [ -z "$(env_get MCSM_ADVERTISE_IP)" ] && [ -n "$LAN_IP" ]; then env_set MCSM_ADVERTISE_IP "$LAN_IP"; fi
+ok "Advertised IP for Bedrock NetherNet: $(env_get MCSM_ADVERTISE_IP) (edit MCSM_ADVERTISE_IP in .env for public/port-forwarded play)"
+
+# Networking mode. Host networking (Linux only) lets phones/consoles discover servers on the LAN and makes
+# NetherNet work without NAT mapping; bridge mode publishes fixed port ranges instead.
+if [ "$OS" = Linux ] && [ -z "$(env_get COMPOSE_FILE)" ]; then
+  NET_MODE=host
+  if [ -t 0 ]; then
+    read -r -p "  Use host networking? Recommended on Linux for Bedrock LAN discovery + NetherNet [Y/n]: " ans
+    case "${ans:-Y}" in n|N) NET_MODE=bridge ;; esac
+  fi
+  if [ "$NET_MODE" = host ]; then env_set COMPOSE_FILE "docker-compose.yml:docker-compose.host.yml"; fi
+fi
+if [ -n "$(env_get COMPOSE_FILE)" ]; then ok "Network: host (ports are opened directly on this machine)"; else ok "Network: bridge (published port ranges)"; fi
+
 DATA_DIR="$(env_get MCSM_DATA_DIR)"; DATA_DIR="${DATA_DIR:-./data}"
 env_set MCSM_DATA_DIR "$DATA_DIR"
 mkdir -p "$DATA_DIR"

@@ -308,6 +308,12 @@ export class ServerManager {
       rec.levelName = String(patch.levelName).replace(/[\\/:*?"<>|]/g, '_') || rec.levelName;
       needsRestart.push('level');
     }
+    if (rec.edition === 'bedrock' && patch.advertiseIp !== undefined && (patch.advertiseIp || undefined) !== rec.advertiseIp) {
+      const ip = String(patch.advertiseIp || '').trim();
+      if (ip && !/^[0-9a-fA-F.:]+$/.test(ip)) throw bad('Advertised IP must be an IPv4 or IPv6 literal');
+      rec.advertiseIp = ip || undefined;
+      needsRestart.push('advertiseIp');
+    }
     if (rec.edition === 'bedrock' && patch.transport !== undefined && patch.transport !== rec.transport) {
       if (!['raknet', 'nethernet'].includes(patch.transport)) throw bad('transport must be raknet or nethernet');
       rec.transport = patch.transport;

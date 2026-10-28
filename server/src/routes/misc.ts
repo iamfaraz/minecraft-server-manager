@@ -38,6 +38,7 @@ export async function miscRoutes(app: FastifyInstance) {
       inDocker: config.inDocker,
       dataDir: config.dataDir,
       ports: { java: config.javaPorts, bedrock: config.bedrockPorts },
+      network: { advertiseIp: config.advertiseIp || null, hostNetwork: config.hostNetwork },
       cpu: { cores: os.cpus().length, load1: load[0] },
       memory: { totalMb: Math.round(os.totalmem() / 1024 / 1024), freeMb: Math.round(os.freemem() / 1024 / 1024), limitMb, allocatedXmxMb: manager.totalXmxMb() },
       javaRuntimes: runtimes,

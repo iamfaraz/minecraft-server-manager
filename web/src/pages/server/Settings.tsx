@@ -26,6 +26,7 @@ export function Settings({ s }: { s: ServerSummary }) {
     geyser: s.geyser,
     geyserPort: String(s.geyserPort || ''),
     transport: s.transport || 'raknet',
+    advertiseIp: s.advertiseIp || '',
     xmxMb: s.java?.xmxMb || 2048,
     xmsMb: s.java?.xmsMb || s.java?.xmxMb || 2048,
     preset: s.java?.preset || 'aikar',
@@ -49,6 +50,7 @@ export function Settings({ s }: { s: ServerSummary }) {
         geyser: form.geyser,
         geyserPort: form.geyserPort ? Number(form.geyserPort) : undefined,
         transport: java ? undefined : form.transport,
+        advertiseIp: java ? undefined : form.advertiseIp,
         java: java ? { xmxMb: form.xmxMb, xmsMb: form.xmsMb, preset: form.preset, extraArgs: form.extraArgs, major: form.major } : undefined,
         backup: { schedule: form.schedule, keep: Number(form.keep), scope: form.scope },
       }),
@@ -113,6 +115,18 @@ export function Settings({ s }: { s: ServerSummary }) {
             {!java && (
               <Field label="Network transport" hint={form.transport === 'raknet' ? 'Classic UDP protocol: status pings, LAN discovery and tunnels all work. Needs two UDP ports.' : 'WebRTC transport (BDS default). One UDP port; no status pings. Behind NAT or a tunnel, set server-udp-ports to "publicIP:publicPort:localPort" below.'}>
                 <Segmented value={form.transport} onChange={(v) => setForm({ ...form, transport: v })} options={[{ value: 'raknet', label: 'RakNet' }, { value: 'nethernet', label: 'NetherNet' }]} />
+              </Field>
+            )}
+            {!java && form.transport === 'nethernet' && !sys?.network?.hostNetwork && (
+              <Field
+                label="Advertised IP for NetherNet"
+                hint={
+                  sys?.network?.advertiseIp
+                    ? `Defaults to ${sys.network.advertiseIp} (MCSM_ADVERTISE_IP). NetherNet negotiates addresses inside the protocol, so the server must announce the IP players actually reach: your server's LAN IP for home play, or the public IP when port-forwarded.`
+                    : 'Required on Docker bridge networking: the IP players type into "Add Server" (your host\u2019s LAN IP, or the public IP when port-forwarded). Without it the server advertises its internal container IP and clients fail with a NetherNet error.'
+                }
+              >
+                <input className="input font-mono" placeholder={sys?.network?.advertiseIp || '192.168.1.50'} value={form.advertiseIp} onChange={(e) => setForm({ ...form, advertiseIp: e.target.value.trim() })} />
               </Field>
             )}
             <Toggle checked={form.autoStart} onChange={(v) => setForm({ ...form, autoStart: v })} label="Start when the manager boots" />

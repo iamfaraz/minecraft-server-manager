@@ -70,6 +70,7 @@ export interface ServerSummary {
   port: number;
   portV6?: number;
   transport?: 'raknet' | 'nethernet';
+  advertiseIp?: string;
   levelName: string;
   java?: JavaSettings;
   autoStart: boolean;
@@ -99,6 +100,7 @@ export interface SystemInfo {
   inDocker: boolean;
   dataDir: string;
   ports: { java: [number, number]; bedrock: [number, number] };
+  network?: { advertiseIp: string | null; hostNetwork: boolean };
   cpu: { cores: number; load1: number };
   memory: { totalMb: number; freeMb: number; limitMb: number | null; allocatedXmxMb: number };
   javaRuntimes: { major: number; path: string; source: string; version?: string }[];

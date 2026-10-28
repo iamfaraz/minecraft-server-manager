@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { downloadCached, exists, run, which, PropertiesFile, type Progress } from '../util.js';
+import { config } from '../config.js';
 import { resolveBedrock } from '../versions/bedrock.js';
 import { bedrockSupport } from '../versions/runtime.js';
 import type { ServerRecord } from '../servers/types.js';
@@ -67,10 +68,14 @@ export async function syncBedrockProperties(rec: ServerRecord, root: string, ini
   pf.set('server-port', rec.port);
   pf.set('server-portv6', rec.portV6 ?? rec.port + 1);
   if (transport === 'nethernet') {
-    // WebRTC data channels: share the game port so only one UDP port needs publishing.
-    // Users behind NAT/tunnels can override this with the public:local mapping syntax in the properties editor.
-    const current = pf.get('server-udp-ports');
-    if (!current || /^\d+$/.test(current)) pf.set('server-udp-ports', rec.port);
+    // WebRTC data channels share the game port so only one UDP port needs publishing. When the container is
+    // NAT'd (bridge network) the server would advertise its internal IP, so map it to the host/LAN IP:
+    //   server-udp-ports=<advertisedIP>:<publicPort>:<localPort>
+    // A hand-edited range/mapping in the properties editor is left alone.
+    const current = pf.get('server-udp-ports') || '';
+    const ip = (rec.advertiseIp || config.advertiseIp || '').trim();
+    const managed = !current || /^\d+$/.test(current) || /^[\d.]+:\d+:\d+$/.test(current) || /^\[[0-9a-fA-F:]+\]:\d+:\d+$/.test(current);
+    if (managed) pf.set('server-udp-ports', ip && !config.hostNetwork ? `${ip.includes(':') ? `[${ip}]` : ip}:${rec.port}:${rec.port}` : String(rec.port));
   }
   // With RakNet, LAN visibility makes BDS also bind the default 19132/19133 — only allow it for the server that owns them.
   pf.set('enable-lan-visibility', transport === 'nethernet' || rec.port === 19132 ? 'true' : 'false');
