@@ -184,6 +184,8 @@ export class ServerInstance extends EventEmitter {
     else if (j.preset === 'zgc') args.push(...zgcFlags(major));
     if (j.extraArgs?.trim()) args.push(...j.extraArgs.trim().split(/\s+/));
     args.push('-Dfile.encoding=UTF-8', '-Dlog4j2.formatMsgNoLookups=true');
+    // JDK 24+ warns on every sun.misc.Unsafe memory access (used by JOML/Netty); the game is fine, silence the noise.
+    if (major >= 24) args.push('--sun-misc-unsafe-memory-access=allow');
     const launch = this.rec.build?.launch;
     if (!launch || launch.kind === 'bedrock') throw new HttpError(409, 'Server is not installed');
     if (launch.kind === 'jar') args.push('-jar', launch.jar);

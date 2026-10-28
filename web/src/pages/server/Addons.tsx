@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { Download, ExternalLink, Package, Power, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowUpCircle, Download, ExternalLink, Laptop, Package, Power, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
+import { hostAddress, timeAgo } from '../../lib/format';
+import { Toggle } from '../../components/ui';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { fmtBytes } from '../../lib/format';
@@ -34,6 +36,212 @@ interface Hit {
   downloads: number;
   author: string;
   installed: boolean;
+}
+
+interface UpdateInfo {
+  fileName: string;
+  enabled: boolean;
+  managed?: string;
+  size: number;
+  onModrinth: boolean;
+  projectId?: string;
+  slug?: string;
+  title?: string;
+  icon?: string;
+  clientSide: 'required' | 'optional' | 'unsupported' | 'unknown';
+  serverSide: 'required' | 'optional' | 'unsupported' | 'unknown';
+  recommendedForClient: boolean;
+  isLibrary: boolean;
+  currentVersion?: string;
+  latestVersion?: string;
+  latestDate?: string;
+  updateAvailable: boolean;
+}
+interface UpdatesReport {
+  checkedAt: string;
+  addons: UpdateInfo[];
+  updatesAvailable: number;
+  clientRequired: number;
+}
+interface ClientPack {
+  id: string;
+  bytes: number;
+  createdAt: string;
+  mods: string[];
+  installer?: string;
+  loader: string;
+  gameVersion: string;
+}
+
+const SIDE_LABEL: Record<UpdateInfo['clientSide'], { text: string; cls: string }> = {
+  required: { text: 'needed on client', cls: 'border-amber-500/30 bg-amber-500/10 text-amber-300' },
+  optional: { text: 'optional on client', cls: 'border-sky-500/30 bg-sky-500/10 text-sky-300' },
+  unsupported: { text: 'server only', cls: 'border-white/10 bg-white/5 text-muted' },
+  unknown: { text: 'unknown side', cls: 'border-white/10 bg-white/5 text-muted' },
+};
+
+function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [checked, setChecked] = useState(false);
+  const updates = useQuery({
+    queryKey: ['addon-updates', s.id],
+    queryFn: () => api.get<UpdatesReport>(`/api/servers/${s.id}/addons/updates`),
+    enabled: checked,
+    staleTime: 10 * 60_000,
+  });
+  const packs = useQuery({ queryKey: ['client-packs', s.id], queryFn: () => api.get<{ packs: ClientPack[] }>(`/api/servers/${s.id}/addons/client-packs`), enabled: isMods });
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [includeInstaller, setIncludeInstaller] = useState(true);
+  const applyUpdates = useMutation({
+    mutationFn: (files: string[] | 'all') => api.post<{ updated: { from: string; to: string; version: string }[] }>(`/api/servers/${s.id}/addons/updates/apply`, { files }),
+    onSuccess: (r) => {
+      toast.success(r.updated.length ? `Updated ${r.updated.length} ${isMods ? 'mod' : 'plugin'}${r.updated.length === 1 ? '' : 's'}${s.state === 'running' ? ' — restart to load them' : ''}` : 'Nothing to update');
+      qc.invalidateQueries({ queryKey: ['addon-updates', s.id] });
+      qc.invalidateQueries({ queryKey: ['addons', s.id] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const build = useMutation({
+    mutationFn: () => api.post<ClientPack>(`/api/servers/${s.id}/addons/client-packs`, { files: [...(selected || [])], includeInstaller, serverAddress: s.address.remote[0]?.split(' ')[0] || hostAddress(s.port) }),
+    onSuccess: (p) => {
+      toast.success(`Client pack ready (${fmtBytes(p.bytes)})`);
+      qc.invalidateQueries({ queryKey: ['client-packs', s.id] });
+      window.location.assign(`/api/servers/${s.id}/addons/client-packs/${p.id}/download`);
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const delPack = useMutation({
+    mutationFn: (id: string) => api.del(`/api/servers/${s.id}/addons/client-packs/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-packs', s.id] }),
+  });
+
+  const report = updates.data;
+  const clientMods = (report?.addons || []).filter((a) => a.enabled && !a.fileName.endsWith('.disabled') && a.clientSide !== 'unsupported');
+  const effectiveSelected = selected ?? new Set(clientMods.filter((a) => a.recommendedForClient).map((a) => a.fileName));
+  const toggleSel = (f: string) => {
+    const n = new Set(effectiveSelected);
+    if (n.has(f)) n.delete(f);
+    else n.add(f);
+    setSelected(n);
+  };
+
+  return (
+    <>
+      <Card
+        className="lg:col-span-2"
+        title={<span className="flex items-center gap-2"><ArrowUpCircle className="size-4 text-accent" /> Updates{report ? <span className={clsx('chip', report.updatesAvailable ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300')}>{report.updatesAvailable ? `${report.updatesAvailable} available` : 'all up to date'}</span> : null}</span>}
+        padded={false}
+        action={
+          <div className="flex items-center gap-2">
+            {report && <span className="text-xs text-muted">checked {timeAgo(report.checkedAt)}</span>}
+            <button className="btn-secondary btn-sm" disabled={updates.isFetching} onClick={() => { setChecked(true); if (checked) updates.refetch(); }}>
+              <RefreshCw className={clsx('size-3.5', updates.isFetching && 'animate-spin')} /> {checked ? 'Re-check' : 'Check for updates'}
+            </button>
+            {report && report.updatesAvailable > 0 && (
+              <button className="btn-primary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate('all')}>
+                {applyUpdates.isPending ? <Spinner /> : <ArrowUpCircle className="size-3.5" />} Update all
+              </button>
+            )}
+          </div>
+        }
+      >
+        {!checked ? (
+          <p className="px-5 py-4 text-sm text-muted">Every installed jar is identified on Modrinth by its file hash (even ones you uploaded by hand), then compared with the newest build for {s.type.toLowerCase()} {s.version}. This also reveals which mods players need on their own game.</p>
+        ) : updates.isLoading ? (
+          <div className="flex justify-center py-10"><Spinner /></div>
+        ) : updates.error ? (
+          <p className="px-5 py-4 text-sm text-rose-300">{(updates.error as Error).message}</p>
+        ) : !report?.addons.length ? (
+          <p className="px-5 py-4 text-sm text-muted">Nothing installed yet.</p>
+        ) : (
+          <ul className="divide-y divide-line/60">
+            {report.addons.map((a) => (
+              <li key={a.fileName} className={clsx('flex items-center gap-3 px-5 py-2.5 text-sm', !a.enabled && 'opacity-50')}>
+                {a.icon ? <img src={a.icon} className="size-7 rounded-md" alt="" /> : <div className="size-7 rounded-md bg-white/5" />}
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2 truncate font-medium">
+                    {a.title || a.fileName}
+                    {a.slug && <a className="text-muted hover:text-ink" href={`https://modrinth.com/${isMods ? 'mod' : 'plugin'}/${a.slug}`} target="_blank" rel="noreferrer"><ExternalLink className="size-3" /></a>}
+                    {isMods && a.onModrinth && <span className={clsx('chip', a.recommendedForClient ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : SIDE_LABEL[a.clientSide].cls)}>{a.isLibrary && a.clientSide !== 'required' ? 'library · needed on client' : SIDE_LABEL[a.clientSide].text}</span>}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-muted">
+                    {a.onModrinth ? (
+                      <>
+                        {a.currentVersion}
+                        {a.updateAvailable && <span className="text-amber-300"> → {a.latestVersion}{a.latestDate ? ` (${new Date(a.latestDate).toLocaleDateString()})` : ''}</span>}
+                      </>
+                    ) : (
+                      <span>{a.fileName} · not found on Modrinth{a.managed === 'geyser' ? ' (managed by Cross-play)' : ''}</span>
+                    )}
+                  </p>
+                </div>
+                {a.updateAvailable ? (
+                  <button className="btn-secondary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate([a.fileName])}>
+                    <ArrowUpCircle className="size-3.5" /> Update
+                  </button>
+                ) : a.onModrinth ? (
+                  <span className="text-xs text-emerald-300">latest</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {isMods && (
+        <Card
+          className="lg:col-span-2"
+          title={<span className="flex items-center gap-2"><Laptop className="size-4 text-violet-300" /> Client pack{report && report.clientRequired > 0 && <span className="chip border-amber-500/30 bg-amber-500/10 text-amber-300">{report.clientRequired} mod{report.clientRequired === 1 ? '' : 's'} players must install</span>}</span>}
+        >
+          {!checked || !report ? (
+            <p className="text-sm text-muted">Run <span className="text-ink">Check for updates</span> first. Mods are then sorted into ones players must install on their own game (for example Fabric API or content mods), optional client additions, and server-only mods.</p>
+          ) : !clientMods.length ? (
+            <p className="text-sm text-muted">None of the installed mods need to be on the client. Players only need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}.</p>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">
+                Players need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}
+                {s.build?.loaderVersion ? ` (loader ${s.build.loaderVersion})` : ''} plus the mods marked <span className="text-amber-300">needed on client</span>. Pick what to bundle; the zip includes a README with install steps{includeInstaller ? ' and the loader installer' : ''}.
+              </p>
+              <ul className="divide-y divide-line/60 rounded-xl border border-line">
+                {clientMods.map((a) => (
+                  <li key={a.fileName} className="flex items-center gap-3 px-4 py-2 text-sm">
+                    <input type="checkbox" className="size-4 accent-emerald-400" checked={effectiveSelected.has(a.fileName)} onChange={() => toggleSel(a.fileName)} />
+                    {a.icon ? <img src={a.icon} className="size-6 rounded" alt="" /> : <div className="size-6 rounded bg-white/5" />}
+                    <span className="min-w-0 flex-1 truncate">{a.title || a.fileName} <span className="font-mono text-[11px] text-muted">{a.currentVersion}</span></span>
+                    <span className={clsx('chip', a.isLibrary && a.clientSide !== 'required' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : SIDE_LABEL[a.clientSide].cls)}>{a.isLibrary && a.clientSide !== 'required' ? 'library · needed with other mods' : SIDE_LABEL[a.clientSide].text}</span>
+                  </li>
+                ))}
+              </ul>
+              <Toggle checked={includeInstaller} onChange={setIncludeInstaller} label={`Include the ${s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} installer`} description="Downloaded from the official Maven so players can set up the loader offline." />
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-primary" disabled={build.isPending || !effectiveSelected.size} onClick={() => build.mutate()}>
+                  {build.isPending ? <Spinner /> : <Download className="size-4" />} Build &amp; download client pack ({effectiveSelected.size})
+                </button>
+                <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set(clientMods.map((a) => a.fileName)))}>Select all</button>
+                <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set(clientMods.filter((a) => a.recommendedForClient).map((a) => a.fileName)))}>Recommended only</button>
+              </div>
+            </div>
+          )}
+          {packs.data?.packs.length ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <span className="label">Previous packs</span>
+              <ul className="divide-y divide-line/60">
+                {packs.data.packs.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 py-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate text-muted">{new Date(p.createdAt).toLocaleString()} · {p.mods.length} mods · {fmtBytes(p.bytes)}{p.installer ? ' · installer' : ''}</span>
+                    <a className="btn-ghost btn-sm" href={`/api/servers/${s.id}/addons/client-packs/${p.id}/download`}><Download className="size-3.5" /></a>
+                    <button className="btn-ghost btn-sm text-rose-300" onClick={() => delPack.mutate(p.id)}><Trash2 className="size-3.5" /></button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Card>
+      )}
+    </>
+  );
 }
 
 export function Addons({ s }: { s: ServerSummary }) {
@@ -97,8 +305,10 @@ export function Addons({ s }: { s: ServerSummary }) {
       </div>
     );
 
+  const isMods = java && ['FABRIC', 'FORGE', 'NEOFORGE'].includes(s.type);
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-2">
+      {java && <ModTools s={s} isMods={isMods} />}
       <Card
         title={`Installed ${label.toLowerCase()}`}
         padded={false}

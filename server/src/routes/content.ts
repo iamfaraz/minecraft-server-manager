@@ -5,6 +5,7 @@ import { bad, fmtBytes } from '../util.js';
 import { backupFile, createBackup, deleteBackup, listBackups, restoreBackup } from '../backups.js';
 import { getPlayers, playerAction, type PlayerAction } from '../players.js';
 import * as addons from '../addons.js';
+import * as mods from '../modupdates.js';
 import * as files from '../files.js';
 import fs from 'node:fs';
 import type { BackupScope } from '../servers/types.js';
@@ -100,6 +101,31 @@ export async function contentRoutes(app: FastifyInstance) {
     const installed = await addons.installModrinth(inst, req.body?.projectId, 0, (m) => inst.pushLog(`[Blockhost] ${m}`));
     if (inst.isActive) inst.pushLog('[Blockhost] Restart to load the new ' + (inst.rec.type === 'PAPER' || inst.rec.type === 'PURPUR' ? 'plugins' : 'mods'));
     return { installed };
+  });
+
+  /* ---------------- Mod updates & client packs ---------------- */
+  app.get<{ Params: { id: string }; Querystring: { refresh?: string } }>('/api/servers/:id/addons/updates', async (req) => mods.checkUpdates(manager.get(req.params.id), req.query.refresh === '1'));
+  app.post<{ Params: { id: string }; Body: { files: string[] | 'all' } }>('/api/servers/:id/addons/updates/apply', async (req) => {
+    const inst = manager.get(req.params.id);
+    return mods.applyUpdates(inst, req.body?.files || 'all', (m) => inst.pushLog(`[Blockhost] ${m}`));
+  });
+  app.get<{ Params: { id: string } }>('/api/servers/:id/addons/client-packs', async (req) => ({ packs: await mods.listClientPacks(manager.get(req.params.id)) }));
+  app.post<{ Params: { id: string }; Body: { files: string[]; includeInstaller?: boolean; serverAddress?: string } }>('/api/servers/:id/addons/client-packs', async (req) => {
+    const inst = manager.get(req.params.id);
+    return mods.buildClientPack(inst, { files: req.body?.files || [], includeInstaller: req.body?.includeInstaller !== false, serverAddress: req.body?.serverAddress }, (m) => inst.pushLog(`[Blockhost] ${m}`));
+  });
+  app.delete<{ Params: { id: string; pid: string } }>('/api/servers/:id/addons/client-packs/:pid', async (req) => {
+    await mods.deleteClientPack(manager.get(req.params.id), req.params.pid);
+    return { ok: true };
+  });
+  app.get<{ Params: { id: string; pid: string } }>('/api/servers/:id/addons/client-packs/:pid/download', async (req, reply) => {
+    const inst = manager.get(req.params.id);
+    const f = mods.clientPackFile(inst, req.params.pid);
+    const st = await fs.promises.stat(f);
+    reply.header('Content-Type', 'application/zip');
+    reply.header('Content-Length', st.size);
+    reply.header('Content-Disposition', `attachment; filename="${inst.rec.name.replace(/[^a-zA-Z0-9 _-]/g, '')}-client-mods.zip"`);
+    return reply.send(fs.createReadStream(f));
   });
 
   /* ---------------- Files ---------------- */

@@ -28,7 +28,7 @@ ARG PLAYIT_VERSION=v0.15.26
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl unzip tar gnupg tini procps util-linux passwd \
+      ca-certificates curl unzip zip tar gnupg tini procps util-linux passwd \
       libcurl4 libssl3 libnss3 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
