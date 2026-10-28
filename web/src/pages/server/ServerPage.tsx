@@ -139,7 +139,7 @@ export function ServerPage() {
 
       <nav className="flex gap-1 overflow-x-auto border-b border-line">
         {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} end={t.to === ''} className={({ isActive }) => clsx('tab', isActive && 'tab-active')}>
+          <NavLink key={t.to} to={`/servers/${s.id}${t.to ? `/${t.to}` : ''}`} end={t.to === ''} className={({ isActive }) => clsx('tab', isActive && 'tab-active')}>
             {t.label}
           </NavLink>
         ))}
@@ -154,7 +154,7 @@ export function ServerPage() {
         <Route path="versions" element={<Versions s={s} />} />
         <Route path="files" element={<Files s={s} />} />
         <Route path="settings" element={<Settings s={s} />} />
-        <Route path="*" element={<Navigate to="" replace />} />
+        <Route path="*" element={<Navigate to={`/servers/${s.id}`} replace />} />
       </Routes>
 
       <ConfirmModal open={killOpen} onClose={() => setKillOpen(false)} onConfirm={() => act('kill')} title="Force kill the server?" body="SIGKILL skips the graceful save. Only use this if the server is hung. Unsaved chunks may be lost." confirmLabel="Kill process" danger busy={busy === 'kill'} />
