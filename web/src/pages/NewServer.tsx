@@ -317,7 +317,7 @@ export function NewServer() {
                 )}
               </div>
               {!isJava && (
-                <Field label="Network transport" hint={f.transport === 'raknet' ? 'Classic UDP protocol. Works with every Bedrock client, status pings, LAN discovery and playit tunnels. Uses two UDP ports (IPv4 + IPv6).' : "Mojang's WebRTC-based transport, the default in recent BDS builds. Uses one UDP port, but status pings are unavailable and NAT/tunnels need a public:local port mapping in server.properties (server-udp-ports)."}>
+                <Field label="Network transport" hint={f.transport === 'raknet' ? 'Classic UDP protocol. Works with every Bedrock client, status pings, LAN discovery and playit tunnels. Uses two UDP ports (IPv4 + IPv6).' : "Mojang's WebRTC-based transport, the default in recent BDS builds. Uses one port on UDP and TCP; pings only report reachability, and behind NAT the server must advertise the IP players use (set automatically from MCSM_ADVERTISE_IP, editable in Settings)."}>
                   <Segmented value={f.transport} onChange={(v) => set('transport', v)} options={[{ value: 'raknet', label: 'RakNet (recommended)' }, { value: 'nethernet', label: 'NetherNet' }]} />
                 </Field>
               )}

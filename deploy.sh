@@ -113,10 +113,10 @@ env_set MCSM_BEDROCK_PORTS "$BEDROCK_PORTS"
 if port_in_use "${JAVA_PORTS%%-*}" tcp && ! grep -qw "${JAVA_PORTS%%-*}" <<<"$OWN_PORT"; then
   warn "TCP ${JAVA_PORTS%%-*} is in use by another program; change MCSM_JAVA_PORTS in .env if the stack fails to start."
 fi
-if port_in_use "${BEDROCK_PORTS%%-*}" udp && ! grep -qw "${BEDROCK_PORTS%%-*}" <<<"$OWN_PORT"; then
-  warn "UDP ${BEDROCK_PORTS%%-*} is in use by another program; change MCSM_BEDROCK_PORTS in .env if the stack fails to start."
+if { port_in_use "${BEDROCK_PORTS%%-*}" udp || port_in_use "${BEDROCK_PORTS%%-*}" tcp; } && ! grep -qw "${BEDROCK_PORTS%%-*}" <<<"$OWN_PORT"; then
+  warn "Port ${BEDROCK_PORTS%%-*} is in use by another program; change MCSM_BEDROCK_PORTS in .env if the stack fails to start."
 fi
-ok "Java ports $JAVA_PORTS (tcp), Bedrock ports $BEDROCK_PORTS (udp)"
+ok "Java ports $JAVA_PORTS (tcp), Bedrock ports $BEDROCK_PORTS (udp + tcp for NetherNet)"
 
 # Memory limit default based on host RAM (leave ~4 GB for the OS), unless already set.
 if [ -z "$(env_get MCSM_MEMORY_LIMIT)" ] || [ "$(env_get MCSM_MEMORY_LIMIT)" = "12g" ]; then

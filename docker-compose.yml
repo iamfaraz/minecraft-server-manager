@@ -13,6 +13,8 @@ services:
       # Java servers (TCP) and Bedrock/Geyser servers (UDP). Keep these in sync with the env vars below.
       - "${MCSM_JAVA_PORTS:-25565-25574}:${MCSM_JAVA_PORTS:-25565-25574}/tcp"
       - "${MCSM_BEDROCK_PORTS:-19132-19141}:${MCSM_BEDROCK_PORTS:-19132-19141}/udp"
+      # NetherNet (WebRTC) signaling runs over TCP on the same port; RakNet is UDP only.
+      - "${MCSM_BEDROCK_PORTS:-19132-19141}:${MCSM_BEDROCK_PORTS:-19132-19141}/tcp"
     environment:
       # Run the manager and every Minecraft server as this host user so files in ./data are yours.
       # Put PUID=$(id -u) and PGID=$(id -g) in .env.
@@ -21,6 +23,7 @@ services:
       MCSM_JAVA_PORTS: "${MCSM_JAVA_PORTS:-25565-25574}"
       MCSM_BEDROCK_PORTS: "${MCSM_BEDROCK_PORTS:-19132-19141}"
       # LAN/public IP that NetherNet Bedrock servers advertise to clients (needed on bridge networking). deploy.sh fills it in.
+      # Use the literal value "public" to look up the machine's public IP on each server start.
       MCSM_ADVERTISE_IP: "${MCSM_ADVERTISE_IP:-}"
       # Seconds a server gets to save after "stop" before it is force-killed
       MCSM_STOP_TIMEOUT_MS: "60000"

@@ -69,10 +69,10 @@ export function System() {
               <span className="font-mono">{s.ports.java[0]}–{s.ports.java[1]}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted">Bedrock &amp; Geyser (UDP)</span>
+              <span className="text-muted">Bedrock &amp; Geyser (UDP, plus TCP for NetherNet)</span>
               <span className="font-mono">{s.ports.bedrock[0]}–{s.ports.bedrock[1]}</span>
             </div>
-            <p className="text-xs text-muted">New servers are assigned ports from these ranges. They must match the ports published in docker-compose.yml (MCSM_JAVA_PORTS / MCSM_BEDROCK_PORTS). Bedrock servers use two consecutive UDP ports (IPv4 + IPv6).</p>
+            <p className="text-xs text-muted">New servers are assigned ports from these ranges. They must match the ports published in docker-compose.yml (MCSM_JAVA_PORTS / MCSM_BEDROCK_PORTS). RakNet servers use two consecutive UDP ports (IPv4 + IPv6); NetherNet servers use one port on both UDP and TCP.</p>
           </div>
         </Card>
         <Card title={<span className="flex items-center gap-2"><Coffee className="size-4 text-orange-300" /> Java runtimes</span>} padded={false}>

@@ -9,7 +9,7 @@ import { installJava, installGeyser, removeGeyser } from '../install/java.js';
 import { installBedrock } from '../install/bedrock.js';
 import { recommendedJavaMajor } from '../versions/java.js';
 import { ServerInstance } from './instance.js';
-import { pingBedrock, pingJava } from './status.js';
+import { pingBedrock, pingJava, probeNetherNet } from './status.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
 import { JAVA_TYPES } from './types.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
@@ -91,7 +91,12 @@ export class ServerManager {
   private async pollPings() {
     for (const inst of this.instances.values()) {
       if (inst.state !== 'running' && inst.state !== 'starting') continue;
-      const r = inst.rec.edition === 'java' ? await pingJava('127.0.0.1', inst.rec.port) : await pingBedrock('127.0.0.1', inst.rec.port, 3000, inst.rec.transport === 'nethernet');
+      const r =
+        inst.rec.edition === 'java'
+          ? await pingJava('127.0.0.1', inst.rec.port)
+          : inst.rec.transport === 'nethernet'
+            ? await probeNetherNet('127.0.0.1', inst.rec.port)
+            : await pingBedrock('127.0.0.1', inst.rec.port);
       inst.ping = r.ok ? r : inst.ping && !r.ok ? { ok: false } : r;
       if (r.ok && inst.state === 'starting') inst.setState('running');
     }
@@ -310,7 +315,7 @@ export class ServerManager {
     }
     if (rec.edition === 'bedrock' && patch.advertiseIp !== undefined && (patch.advertiseIp || undefined) !== rec.advertiseIp) {
       const ip = String(patch.advertiseIp || '').trim();
-      if (ip && !/^[0-9a-fA-F.:]+$/.test(ip)) throw bad('Advertised IP must be an IPv4 or IPv6 literal');
+      if (ip && ip.toLowerCase() !== 'public' && !/^[0-9a-fA-F.:]+$/.test(ip)) throw bad('Advertised IP must be an IPv4/IPv6 literal or "public"');
       rec.advertiseIp = ip || undefined;
       needsRestart.push('advertiseIp');
     }

@@ -113,7 +113,7 @@ export function Settings({ s }: { s: ServerSummary }) {
               </Field>
             </div>
             {!java && (
-              <Field label="Network transport" hint={form.transport === 'raknet' ? 'Classic UDP protocol: status pings, LAN discovery and tunnels all work. Needs two UDP ports.' : 'WebRTC transport (BDS default). One UDP port; no status pings. Behind NAT or a tunnel, set server-udp-ports to "publicIP:publicPort:localPort" below.'}>
+              <Field label="Network transport" hint={form.transport === 'raknet' ? 'Classic UDP protocol: status pings, LAN discovery and tunnels all work. Needs two UDP ports.' : 'WebRTC transport (BDS default). One port on UDP + TCP; pings only report reachability. Behind NAT the advertised IP below is written into server-udp-ports.'}>
                 <Segmented value={form.transport} onChange={(v) => setForm({ ...form, transport: v })} options={[{ value: 'raknet', label: 'RakNet' }, { value: 'nethernet', label: 'NetherNet' }]} />
               </Field>
             )}
@@ -126,7 +126,7 @@ export function Settings({ s }: { s: ServerSummary }) {
                     : 'Required on Docker bridge networking: the IP players type into "Add Server" (your host\u2019s LAN IP, or the public IP when port-forwarded). Without it the server advertises its internal container IP and clients fail with a NetherNet error.'
                 }
               >
-                <input className="input font-mono" placeholder={sys?.network?.advertiseIp || '192.168.1.50'} value={form.advertiseIp} onChange={(e) => setForm({ ...form, advertiseIp: e.target.value.trim() })} />
+                <input className="input font-mono" placeholder={sys?.network?.advertiseIp || '192.168.1.50  (or: public)'} value={form.advertiseIp} onChange={(e) => setForm({ ...form, advertiseIp: e.target.value.trim() })} />
               </Field>
             )}
             <Toggle checked={form.autoStart} onChange={(v) => setForm({ ...form, autoStart: v })} label="Start when the manager boots" />

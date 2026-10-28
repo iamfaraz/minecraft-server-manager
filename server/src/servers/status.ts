@@ -97,9 +97,29 @@ export function pingJava(host: string, port: number, timeoutMs = 3000): Promise<
 
 const MAGIC = Buffer.from('00ffff00fefefefefdfdfdfd12345678', 'hex');
 
+/**
+ * NetherNet has no public status ping; its signaling listens on TCP at the server port, so a TCP connect
+ * tells us the server is up and gives a latency figure (no MOTD/player count).
+ */
+export function probeNetherNet(host: string, port: number, timeoutMs = 2000): Promise<PingResult> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const sock = new net.Socket();
+    let done = false;
+    const finish = (r: PingResult) => {
+      if (done) return;
+      done = true;
+      sock.destroy();
+      resolve(r);
+    };
+    sock.setTimeout(timeoutMs, () => finish({ ok: false }));
+    sock.on('error', () => finish({ ok: false }));
+    sock.connect(port, host, () => finish({ ok: true, latencyMs: Date.now() - start }));
+  });
+}
+
 /** RakNet Unconnected Ping (0x01) -> Unconnected Pong (0x1c). */
-export function pingBedrock(host: string, port: number, timeoutMs = 3000, nethernet = false): Promise<PingResult> {
-  if (nethernet) timeoutMs = Math.min(timeoutMs, 1500);
+export function pingBedrock(host: string, port: number, timeoutMs = 3000): Promise<PingResult> {
   return new Promise((resolve) => {
     const start = Date.now();
     const sock = dgram.createSocket('udp4');

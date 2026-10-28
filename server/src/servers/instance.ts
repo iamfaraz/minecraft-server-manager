@@ -147,7 +147,7 @@ export class ServerInstance extends EventEmitter {
       this.rec.edition === 'java'
         ? [{ port: this.rec.port, udp: false }, ...(this.rec.geyser && this.rec.geyserPort ? [{ port: this.rec.geyserPort, udp: true }] : [])]
         : this.rec.transport === 'nethernet'
-          ? [{ port: this.rec.port, udp: true }]
+          ? [{ port: this.rec.port, udp: true }, { port: this.rec.port, udp: false }]
           : [{ port: this.rec.port, udp: true }, { port: this.rec.portV6 ?? this.rec.port + 1, udp: true }];
     for (const { port, udp } of ports) {
       const free = await new Promise<boolean>((res) => {

@@ -36,7 +36,7 @@ Docker can only publish ports when the container starts, so the compose file pub
 | Env var               | Default        | Used by                                   |
 | --------------------- | -------------- | ----------------------------------------- |
 | `MCSM_JAVA_PORTS`     | `25565-25574`  | Java servers (TCP)                        |
-| `MCSM_BEDROCK_PORTS`  | `19132-19141`  | Bedrock servers (2 UDP ports each) and Geyser |
+| `MCSM_BEDROCK_PORTS`  | `19132-19141`  | Bedrock servers and Geyser: UDP, plus TCP for NetherNet signaling |
 
 Widen the ranges in `.env` if you need more servers. Players on your LAN connect to `<host-ip>:<port>`; the UI shows the address on each server.
 
@@ -59,8 +59,8 @@ Recent Bedrock Dedicated Server builds default to **NetherNet**, Mojang's WebRTC
 
 | | RakNet (default here) | NetherNet |
 | --- | --- | --- |
-| Ports | 2 UDP (IPv4 + IPv6), both published | 1 UDP (dual-stack) |
-| Status ping / MOTD / player count | Yes (RakNet unconnected ping) | No standard ping; state comes from the log |
+| Ports | 2 UDP (IPv4 + IPv6) | 1 port, UDP (WebRTC data) **and TCP** (signaling) |
+| Status ping / MOTD / player count | Yes (RakNet unconnected ping) | Reachability + latency only (TCP probe) |
 | LAN discovery | Only the server on 19132 (BDS binds 19132/19133 for discovery) | Yes |
 | Behind NAT, Docker on another host, playit | Works as-is | Needs `server-udp-ports=publicIP:publicPort:localPort` in server.properties |
 
@@ -69,7 +69,7 @@ The manager writes `transport`, `server-port`, `server-portv6`, `server-udp-port
 **NetherNet and Docker networking.** NetherNet negotiates addresses *inside* the protocol (WebRTC/ICE), so on Docker's bridge network the server would advertise its internal 172.x address and clients fail with a NetherNet error even though the UDP port is published. Two fixes, both handled for you:
 
 - **Host networking (Linux, recommended).** `deploy.sh` offers it on Linux and writes `COMPOSE_FILE=docker-compose.yml:docker-compose.host.yml` into `.env`. Ports open directly on the host, Bedrock LAN discovery (the Friends tab) works, and no address mapping is needed. Manually: `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`.
-- **Advertised IP (bridge mode).** `deploy.sh` stores your LAN IP as `MCSM_ADVERTISE_IP`; the manager then writes `server-udp-ports=<ip>:<port>:<port>` for NetherNet servers. Override per server under Settings → *Advertised IP for NetherNet* (use your public IP when port-forwarding).
+- **Advertised IP (bridge mode).** `deploy.sh` stores your LAN IP as `MCSM_ADVERTISE_IP`; the manager then writes `server-udp-ports=<ip>:<port>:<port>` for NetherNet servers. Override per server under Settings → *Advertised IP for NetherNet*. The value `public` resolves your current public IP on every start (for port-forwarded servers with a dynamic IP).
 
 LAN discovery in bridge mode never works (broadcasts don't cross the Docker bridge); players must use *Add Server* with the host IP and port.
 

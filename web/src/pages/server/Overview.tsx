@@ -53,7 +53,7 @@ export function Overview({ s }: { s: ServerSummary }) {
     <div className="fade-up space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Uptime" value={uptime} sub={running ? 'online' : s.lastExit ? `stopped ${timeAgo(s.lastExit.at)}` : 'offline'} icon={Clock} tone="accent" />
-        <Stat label="Players" value={`${s.players.length}${s.ping?.max ? ` / ${s.ping.max}` : ''}`} sub={s.ping?.latencyMs != null ? `${s.ping.latencyMs} ms ping` : s.transport === 'nethernet' ? 'no status ping on NetherNet' : 'no ping yet'} icon={Users} tone="violet" />
+        <Stat label="Players" value={`${s.players.length}${s.ping?.max ? ` / ${s.ping.max}` : ''}`} sub={s.ping?.latencyMs != null ? `${s.ping.latencyMs} ms ping` : s.transport === 'nethernet' ? 'NetherNet: no player count in ping' : 'no ping yet'} icon={Users} tone="violet" />
         <Stat label="CPU" value={running && s.lastStats ? `${s.lastStats.cpu.toFixed(0)}%` : '—'} sub="of one core" icon={Cpu} tone="amber" />
         <Stat label="Memory" value={running && s.lastStats ? fmtMb(s.lastStats.memMb) : '—'} sub={s.java ? `heap limit ${fmtMb(s.java.xmxMb)}` : 'resident set size'} icon={MemoryStick} tone="rose" />
       </div>
@@ -94,7 +94,7 @@ export function Overview({ s }: { s: ServerSummary }) {
             {s.java && <Item label="Java" value={s.java.major === 'auto' ? 'Automatic' : `Java ${s.java.major}`} />}
             {s.java && <Item label="JVM flags" value={s.java.preset === 'aikar' ? "Aikar's" : s.java.preset === 'zgc' ? 'Generational ZGC' : 'None'} />}
             {s.build?.loaderVersion && <Item label="Loader" value={s.build.loaderVersion} />}
-            <Item label="Port" value={s.edition === 'bedrock' ? (s.transport === 'nethernet' ? `${s.port} UDP` : `${s.port} / ${s.portV6} UDP`) : `${s.port} TCP`} />
+            <Item label="Port" value={s.edition === 'bedrock' ? (s.transport === 'nethernet' ? `${s.port} UDP + TCP` : `${s.port} / ${s.portV6} UDP`) : `${s.port} TCP`} />
             {s.edition === 'bedrock' && <Item label="Transport" value={s.transport === 'nethernet' ? 'NetherNet (WebRTC)' : 'RakNet'} />}
             {s.ping?.motd && <Item label="MOTD" value={s.ping.motd} />}
             {s.ping?.version && <Item label="Reported version" value={s.ping.version} icon={Gauge} />}

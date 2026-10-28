@@ -3,6 +3,27 @@ import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { downloadCached, exists, run, which, PropertiesFile, type Progress } from '../util.js';
 import { config } from '../config.js';
+import { fetchText } from '../util.js';
+
+let publicIpCache: { at: number; ip: string } | null = null;
+/** Resolve the advertised IP; the literal "public" looks up this machine's public IPv4 (cached 10 min). */
+export async function resolveAdvertiseIp(value: string): Promise<string> {
+  const v = value.trim();
+  if (v.toLowerCase() !== 'public' && v !== '<public_ip>') return v;
+  if (publicIpCache && Date.now() - publicIpCache.at < 10 * 60_000) return publicIpCache.ip;
+  for (const url of ['https://api.ipify.org', 'https://ipv4.icanhazip.com', 'https://checkip.amazonaws.com']) {
+    try {
+      const ip = (await fetchText(url, 8000)).trim();
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+        publicIpCache = { at: Date.now(), ip };
+        return ip;
+      }
+    } catch {
+      /* next provider */
+    }
+  }
+  return '';
+}
 import { resolveBedrock } from '../versions/bedrock.js';
 import { bedrockSupport } from '../versions/runtime.js';
 import type { ServerRecord } from '../servers/types.js';
@@ -73,7 +94,7 @@ export async function syncBedrockProperties(rec: ServerRecord, root: string, ini
     //   server-udp-ports=<advertisedIP>:<publicPort>:<localPort>
     // A hand-edited range/mapping in the properties editor is left alone.
     const current = pf.get('server-udp-ports') || '';
-    const ip = (rec.advertiseIp || config.advertiseIp || '').trim();
+    const ip = await resolveAdvertiseIp(rec.advertiseIp || config.advertiseIp || '');
     const managed = !current || /^\d+$/.test(current) || /^[\d.]+:\d+:\d+$/.test(current) || /^\[[0-9a-fA-F:]+\]:\d+:\d+$/.test(current);
     if (managed) pf.set('server-udp-ports', ip && !config.hostNetwork ? `${ip.includes(':') ? `[${ip}]` : ip}:${rec.port}:${rec.port}` : String(rec.port));
   }
