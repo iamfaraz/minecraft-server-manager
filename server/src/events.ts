@@ -9,6 +9,7 @@ export type BusEvent =
   | { type: 'server.changed'; id?: string }
   | { type: 'playit'; status: unknown }
   | { type: 'backup.changed'; id: string }
+  | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string };
 
 class Bus extends EventEmitter {

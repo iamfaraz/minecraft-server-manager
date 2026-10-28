@@ -9,6 +9,10 @@ import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
 import { MOD_TYPES } from './servers/types.js';
 import { listAddons } from './addons.js';
+import { bus } from './events.js';
+
+const progress = (id: string, key: string, pct: number | null, message: string, extra: { done?: boolean; error?: string; newFileName?: string } = {}) =>
+  bus.publish({ type: 'addon.progress', id, key, pct, message, ...extra });
 
 const MR = 'https://api.modrinth.com/v2';
 const LOADERS: Record<string, string[]> = {
@@ -170,9 +174,17 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
     if (!/^[^/\\]+\.jar(\.disabled)?$/i.test(newName)) continue;
     const dest = path.join(inst.root, dir, newName);
     log?.(`Updating ${t.title || t.fileName} → ${t.latestVersion}`);
-    await downloadTo(t.latestFileUrl, `${dest}.new`);
-    await fsp.rm(path.join(inst.root, dir, t.fileName), { force: true });
-    await fsp.rename(`${dest}.new`, dest);
+    progress(inst.id, t.fileName, 0, `Downloading ${t.latestVersion}`);
+    try {
+      await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg));
+      await fsp.rm(path.join(inst.root, dir, t.fileName), { force: true });
+      await fsp.rename(`${dest}.new`, dest);
+    } catch (e) {
+      progress(inst.id, t.fileName, null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
+      await fsp.rm(`${dest}.new`, { force: true });
+      continue;
+    }
+    progress(inst.id, t.fileName, 100, `Updated to ${t.latestVersion}`, { done: true, newFileName: newName });
     delete manifest[t.fileName.replace(/\.disabled$/, '')];
     manifest[newName.replace(/\.disabled$/, '')] = { projectId: t.projectId, versionId: t.latestVersionId, title: t.title, icon: t.icon, slug: t.slug };
     updated.push({ from: t.fileName, to: newName, version: t.latestVersion || '' });
@@ -262,16 +274,18 @@ export async function buildClientPack(
   try {
     await fsp.mkdir(path.join(stage, 'mods'), { recursive: true });
     for (const f of files) await fsp.copyFile(path.join(inst.root, dir, f), path.join(stage, 'mods', f));
+    progress(inst.id, 'client-pack', null, `Collecting ${files.length} mods`);
     let installerLabel: string | undefined;
     if (opts.includeInstaller) {
       const inst2 = await loaderInstaller(inst);
       if (inst2) {
         log?.(`Downloading ${inst2.label}`);
         await fsp.mkdir(path.join(stage, 'installer'), { recursive: true });
-        await downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName));
+        await downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName), (pct, msg) => progress(inst.id, 'client-pack', pct, msg));
         installerLabel = inst2.label;
       }
     }
+    progress(inst.id, 'client-pack', null, 'Compressing');
     const loaderName = inst.rec.type === 'FABRIC' ? 'Fabric' : inst.rec.type === 'FORGE' ? 'Forge' : 'NeoForge';
     const readme = [
       `${inst.rec.name} — client mods for Minecraft ${inst.rec.version} (${loaderName})`,
@@ -316,7 +330,11 @@ export async function buildClientPack(
     };
     await writeJson(path.join(outDir, `${id}.json`), meta);
     inst.pushLog(`[Blockhost] Client pack built: ${files.length} mods, ${fmtBytes(st.size)}`);
+    progress(inst.id, 'client-pack', 100, `Ready (${fmtBytes(st.size)})`, { done: true });
     return meta;
+  } catch (e) {
+    progress(inst.id, 'client-pack', null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
+    throw e;
   } finally {
     await rmrf(stage);
   }

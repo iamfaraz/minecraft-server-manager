@@ -6,6 +6,7 @@ import { downloadTo, exists, fetchJson, parseJsonLoose, readJson, rmrf, safeJoin
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
 import type { ServerType } from './servers/types.js';
+import { bus } from './events.js';
 
 /* ------------------------------ Java: plugins / mods ------------------------------ */
 
@@ -113,21 +114,34 @@ export async function installModrinth(inst: ServerInstance, projectId: string, d
   if (!loaders) throw bad('This server type does not support plugins or mods');
   const manifest = await readJson<AddonManifest>(manifestFile(inst), {});
   if (Object.values(manifest).some((m) => m?.projectId === projectId)) return [];
-  const project = await fetchJson<any>(`${MR}/project/${encodeURIComponent(projectId)}`);
+  const prog = (pct: number | null, message: string, extra: { done?: boolean; error?: string } = {}) => bus.publish({ type: 'addon.progress', id: inst.id, key: projectId, pct, message, ...extra });
+  prog(null, 'Resolving version');
+  let project: any;
+  try {
+    project = await fetchJson<any>(`${MR}/project/${encodeURIComponent(projectId)}`);
+  } catch (e) {
+    prog(null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
+    throw e;
+  }
   const versions = await fetchJson<any[]>(
     `${MR}/project/${encodeURIComponent(projectId)}/version?loaders=${encodeURIComponent(JSON.stringify(loaders))}&game_versions=${encodeURIComponent(JSON.stringify([inst.rec.version]))}`,
   );
   const v = versions[0];
-  if (!v) throw new HttpError(404, `${project.title} has no release for ${inst.rec.type} ${inst.rec.version}`);
+  if (!v) {
+    const msg = `${project.title} has no release for ${inst.rec.type} ${inst.rec.version}`;
+    prog(null, msg, { done: true, error: msg });
+    throw new HttpError(404, msg);
+  }
   const file = v.files.find((f: any) => f.primary) || v.files[0];
   const dir = extensionDir(inst.rec)!;
   const dest = addonPath(inst, path.basename(file.filename));
   log?.(`Downloading ${project.title} ${v.version_number}`);
   await fsp.mkdir(path.join(inst.root, dir), { recursive: true });
-  await downloadTo(file.url, dest);
+  await downloadTo(file.url, dest, (pct, msg) => prog(pct, msg));
   manifest[path.basename(file.filename)] = { projectId: project.id, versionId: v.id, title: project.title, icon: project.icon_url, slug: project.slug };
   await writeJson(manifestFile(inst), manifest);
   const installed = [project.title];
+  prog(100, `Installed ${v.version_number}`, { done: true });
   if (depth < 2) {
     for (const dep of v.dependencies || []) {
       if (dep.dependency_type !== 'required' || !dep.project_id) continue;

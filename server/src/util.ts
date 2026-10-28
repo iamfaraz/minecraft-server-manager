@@ -170,7 +170,12 @@ export async function downloadTo(url: string, dest: string, onProgress?: Progres
   const total = Number(res.headers.get('content-length') || 0);
   let done = 0;
   let lastEmit = 0;
-  const label = path.basename(new URL(url).pathname) || 'file';
+  let label = path.basename(new URL(url).pathname) || 'file';
+  try {
+    label = decodeURIComponent(label);
+  } catch {
+    /* keep raw */
+  }
   const counter = new (await import('node:stream')).Transform({
     transform(chunk, _enc, cb) {
       done += chunk.length;

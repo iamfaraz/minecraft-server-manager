@@ -4,6 +4,9 @@ import { ArrowUpCircle, Download, ExternalLink, Laptop, Package, Power, RefreshC
 import { hostAddress, timeAgo } from '../../lib/format';
 import { Toggle } from '../../components/ui';
 import { useEffect, useRef, useState } from 'react';
+import { useWsEvent } from '../../lib/ws';
+import type { WsEvent } from '../../lib/types';
+import { ProgressBar } from '../../components/ui';
 import { api } from '../../lib/api';
 import { fmtBytes } from '../../lib/format';
 import type { ServerSummary } from '../../lib/types';
@@ -73,6 +76,37 @@ interface ClientPack {
   gameVersion: string;
 }
 
+export interface ItemProgress { pct: number | null; message: string; done?: boolean; error?: string; at: number }
+
+/** Live per-item progress (keyed by file name / project id / 'client-pack') from the websocket. */
+function useAddonProgress(serverId: string, onDone?: (key: string, ev: Extract<WsEvent, { type: 'addon.progress' }>) => void) {
+  const [progress, setProgress] = useState<Record<string, ItemProgress>>({});
+  useWsEvent((ev: WsEvent) => {
+    if (ev.type !== 'addon.progress' || ev.id !== serverId) return;
+    setProgress((p) => ({ ...p, [ev.key]: { pct: ev.pct, message: ev.message, done: ev.done, error: ev.error, at: Date.now() } }));
+    if (ev.done) {
+      onDone?.(ev.key, ev);
+      // keep the final message visible briefly, then clear
+      setTimeout(() => setProgress((p) => {
+        const n = { ...p };
+        if (n[ev.key]?.done) delete n[ev.key];
+        return n;
+      }), ev.error ? 8000 : 2500);
+    }
+  });
+  return progress;
+}
+
+function InlineProgress({ p }: { p?: ItemProgress }) {
+  if (!p) return null;
+  return (
+    <div className="mt-1.5 space-y-1">
+      {!p.done && <ProgressBar pct={p.pct} />}
+      <p className={clsx('truncate text-[11px]', p.error ? 'text-rose-300' : p.done ? 'text-emerald-300' : 'text-muted')}>{p.message}</p>
+    </div>
+  );
+}
+
 const SIDE_LABEL: Record<UpdateInfo['clientSide'], { text: string; cls: string }> = {
   required: { text: 'needed on client', cls: 'border-amber-500/30 bg-amber-500/10 text-amber-300' },
   optional: { text: 'optional on client', cls: 'border-sky-500/30 bg-sky-500/10 text-sky-300' },
@@ -83,18 +117,34 @@ const SIDE_LABEL: Record<UpdateInfo['clientSide'], { text: string; cls: string }
 function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [checked, setChecked] = useState(false);
   const updates = useQuery({
     queryKey: ['addon-updates', s.id],
     queryFn: () => api.get<UpdatesReport>(`/api/servers/${s.id}/addons/updates`),
-    enabled: checked,
     staleTime: 10 * 60_000,
   });
+  const recheck = useMutation({
+    mutationFn: () => api.get<UpdatesReport>(`/api/servers/${s.id}/addons/updates?refresh=1`),
+    onSuccess: (d) => qc.setQueryData(['addon-updates', s.id], d),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+  const progress = useAddonProgress(s.id, (key) => {
+    setBusyKeys((b) => { const n = new Set(b); n.delete(key); return n; });
+    qc.invalidateQueries({ queryKey: ['addons', s.id] });
+    if (key === 'client-pack') qc.invalidateQueries({ queryKey: ['client-packs', s.id] });
+    else qc.invalidateQueries({ queryKey: ['addon-updates', s.id] });
+  });
+  const checked = true;
   const packs = useQuery({ queryKey: ['client-packs', s.id], queryFn: () => api.get<{ packs: ClientPack[] }>(`/api/servers/${s.id}/addons/client-packs`), enabled: isMods });
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [includeInstaller, setIncludeInstaller] = useState(true);
   const applyUpdates = useMutation({
-    mutationFn: (files: string[] | 'all') => api.post<{ updated: { from: string; to: string; version: string }[] }>(`/api/servers/${s.id}/addons/updates/apply`, { files }),
+    mutationFn: (files: string[] | 'all') => {
+      const keys = files === 'all' ? (updates.data?.addons.filter((a) => a.updateAvailable).map((a) => a.fileName) ?? []) : files;
+      setBusyKeys((b) => new Set([...b, ...keys]));
+      return api.post<{ updated: { from: string; to: string; version: string }[] }>(`/api/servers/${s.id}/addons/updates/apply`, { files });
+    },
+    onSettled: () => setBusyKeys(new Set()),
     onSuccess: (r) => {
       toast.success(r.updated.length ? `Updated ${r.updated.length} ${isMods ? 'mod' : 'plugin'}${r.updated.length === 1 ? '' : 's'}${s.state === 'running' ? ' — restart to load them' : ''}` : 'Nothing to update');
       qc.invalidateQueries({ queryKey: ['addon-updates', s.id] });
@@ -135,8 +185,8 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
         action={
           <div className="flex items-center gap-2">
             {report && <span className="text-xs text-muted">checked {timeAgo(report.checkedAt)}</span>}
-            <button className="btn-secondary btn-sm" disabled={updates.isFetching} onClick={() => { setChecked(true); if (checked) updates.refetch(); }}>
-              <RefreshCw className={clsx('size-3.5', updates.isFetching && 'animate-spin')} /> {checked ? 'Re-check' : 'Check for updates'}
+            <button className="btn-secondary btn-sm" disabled={updates.isFetching || recheck.isPending} onClick={() => recheck.mutate()}>
+              <RefreshCw className={clsx('size-3.5', (updates.isFetching || recheck.isPending) && 'animate-spin')} /> Re-check
             </button>
             {report && report.updatesAvailable > 0 && (
               <button className="btn-primary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate('all')}>
@@ -146,10 +196,8 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
           </div>
         }
       >
-        {!checked ? (
-          <p className="px-5 py-4 text-sm text-muted">Every installed jar is identified on Modrinth by its file hash (even ones you uploaded by hand), then compared with the newest build for {s.type.toLowerCase()} {s.version}. This also reveals which mods players need on their own game.</p>
-        ) : updates.isLoading ? (
-          <div className="flex justify-center py-10"><Spinner /></div>
+        {updates.isLoading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Spinner /> Identifying installed jars on Modrinth…</div>
         ) : updates.error ? (
           <p className="px-5 py-4 text-sm text-rose-300">{(updates.error as Error).message}</p>
         ) : !report?.addons.length ? (
@@ -175,8 +223,11 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                       <span>{a.fileName} · not found on Modrinth{a.managed === 'geyser' ? ' (managed by Cross-play)' : ''}</span>
                     )}
                   </p>
+                  <InlineProgress p={progress[a.fileName]} />
                 </div>
-                {a.updateAvailable ? (
+                {busyKeys.has(a.fileName) || (progress[a.fileName] && !progress[a.fileName].done) ? (
+                  <span className="flex items-center gap-1.5 text-xs text-muted"><Spinner /> {progress[a.fileName]?.pct != null ? `${progress[a.fileName].pct}%` : 'working'}</span>
+                ) : a.updateAvailable ? (
                   <button className="btn-secondary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate([a.fileName])}>
                     <ArrowUpCircle className="size-3.5" /> Update
                   </button>
@@ -219,6 +270,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                 <button className="btn-primary" disabled={build.isPending || !effectiveSelected.size} onClick={() => build.mutate()}>
                   {build.isPending ? <Spinner /> : <Download className="size-4" />} Build &amp; download client pack ({effectiveSelected.size})
                 </button>
+                {progress['client-pack'] && <span className="w-full sm:w-64"><InlineProgress p={progress['client-pack']} /></span>}
                 <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set(clientMods.map((a) => a.fileName)))}>Select all</button>
                 <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set(clientMods.filter((a) => a.recommendedForClient).map((a) => a.fileName)))}>Recommended only</button>
               </div>
@@ -248,6 +300,11 @@ export function Addons({ s }: { s: ServerSummary }) {
   const qc = useQueryClient();
   const toast = useToast();
   const java = s.edition === 'java';
+  const installProgress = useAddonProgress(s.id, () => {
+    qc.invalidateQueries({ queryKey: ['addons', s.id] });
+    qc.invalidateQueries({ queryKey: ['modrinth', s.id] });
+    qc.invalidateQueries({ queryKey: ['addon-updates', s.id] });
+  });
   const q = useQuery({ queryKey: ['addons', s.id], queryFn: () => api.get<Listing>(`/api/servers/${s.id}/addons`) });
   const fileRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -410,9 +467,11 @@ export function Addons({ s }: { s: ServerSummary }) {
                     <p className="text-[11px] text-muted">
                       {h.author} · {Intl.NumberFormat(undefined, { notation: 'compact' }).format(h.downloads)} downloads
                     </p>
+                    <InlineProgress p={installProgress[h.projectId]} />
                   </div>
                   <button className={h.installed ? 'btn-ghost btn-sm' : 'btn-secondary btn-sm'} disabled={h.installed || install.isPending} onClick={() => install.mutate(h.projectId)}>
-                    {install.isPending && install.variables === h.projectId ? <Spinner /> : <Download className="size-3.5" />} {h.installed ? 'Installed' : 'Install'}
+                    {install.isPending && install.variables === h.projectId ? <Spinner /> : <Download className="size-3.5" />}{' '}
+                    {h.installed ? 'Installed' : install.isPending && install.variables === h.projectId ? (installProgress[h.projectId]?.pct != null ? `${installProgress[h.projectId].pct}%` : 'Installing') : 'Install'}
                   </button>
                 </li>
               ))}

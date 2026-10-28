@@ -159,4 +159,5 @@ export type WsEvent =
   | { type: 'server.changed'; id?: string }
   | { type: 'playit'; status: PlayitStatus }
   | { type: 'backup.changed'; id: string }
+  | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
   | { type: 'pong' };
