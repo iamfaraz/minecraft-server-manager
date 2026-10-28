@@ -1,0 +1,32 @@
+services:
+  blockhost:
+    # Published multi-arch image (linux/amd64 + linux/arm64). `docker compose up -d` pulls it;
+    # `docker compose up -d --build` builds from source instead.
+    image: ${MCSM_IMAGE:-iamfaraz/minecraft-server-manager}:${MCSM_IMAGE_TAG:-latest}
+    build: .
+    container_name: blockhost
+    restart: unless-stopped
+    # Give servers time to save their worlds when the container stops
+    stop_grace_period: 2m
+    ports:
+      - "${MCSM_WEB_PORT:-8080}:8080"
+      # Java servers (TCP) and Bedrock/Geyser servers (UDP). Keep these in sync with the env vars below.
+      - "${MCSM_JAVA_PORTS:-25565-25574}:${MCSM_JAVA_PORTS:-25565-25574}/tcp"
+      - "${MCSM_BEDROCK_PORTS:-19132-19141}:${MCSM_BEDROCK_PORTS:-19132-19141}/udp"
+    environment:
+      # Run the manager and every Minecraft server as this host user so files in ./data are yours.
+      # Put PUID=$(id -u) and PGID=$(id -g) in .env.
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      MCSM_JAVA_PORTS: "${MCSM_JAVA_PORTS:-25565-25574}"
+      MCSM_BEDROCK_PORTS: "${MCSM_BEDROCK_PORTS:-19132-19141}"
+      # Seconds a server gets to save after "stop" before it is force-killed
+      MCSM_STOP_TIMEOUT_MS: "60000"
+    volumes:
+      - ${MCSM_DATA_DIR:-./data}:/data
+    # Hard memory ceiling for the whole container (all Java heaps + Bedrock + manager).
+    # The UI warns when the sum of -Xmx values gets close to this.
+    mem_limit: ${MCSM_MEMORY_LIMIT:-12g}
+    # Apple Silicon / ARM: Bedrock runs through box64 by default. If you prefer Rosetta/QEMU,
+    # uncomment the next line to run the whole container as x86_64 instead.
+    # platform: linux/amd64
