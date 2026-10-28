@@ -76,7 +76,7 @@ ENV MCSM_DATA_DIR=/data \
     NODE_ENV=production
 VOLUME ["/data"]
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD curl -fsS http://127.0.0.1:8080/api/auth/status >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD curl -fsS "http://127.0.0.1:${MCSM_PORT:-8080}/api/auth/status" >/dev/null || exit 1
 
 # tini reaps zombie server processes and forwards SIGTERM so worlds save on shutdown
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/docker-entrypoint.sh"]

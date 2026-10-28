@@ -8,3 +8,5 @@ services:
     ports: !reset []
     environment:
       MCSM_HOST_NETWORK: "1"
+      # No port mapping on the host network: the app itself must listen on the chosen web port.
+      MCSM_PORT: "${MCSM_WEB_PORT:-8080}"

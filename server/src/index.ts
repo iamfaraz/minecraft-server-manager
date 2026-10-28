@@ -52,7 +52,7 @@ async function main() {
   await manager.init();
   await playit.init();
 
-  await app.listen({ port: config.port, host: config.host });
+  await app.listen({ port: config.port, host: config.host, listenTextResolver: (addr) => `listening on ${addr}` });
   app.log.info(`Blockhost ready on http://${config.host}:${config.port} (data: ${config.dataDir})`);
 
   let shuttingDown = false;
