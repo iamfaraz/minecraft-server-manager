@@ -36,6 +36,8 @@ export interface PlayitStatus {
 }
 
 const API = 'https://api.playit.gg';
+/** Pinned agent release (single-binary CLI with `start` + claim link). Must match PLAYIT_VERSION in the Dockerfile. */
+const PLAYIT_VERSION = process.env.MCSM_PLAYIT_VERSION || 'v0.15.26';
 
 class PlayitService {
   private proc: ChildProcess | null = null;
@@ -125,7 +127,7 @@ class PlayitService {
     this.pushLog('[Blockhost] Downloading playit agent');
     const os = config.platform === 'darwin' ? 'darwin' : 'linux';
     const arch = config.arch === 'arm64' ? (os === 'darwin' ? 'arm64' : 'aarch64') : 'amd64';
-    const url = `https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-${os}-${arch}`;
+    const url = `https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}/playit-${os}-${arch}`;
     await downloadTo(url, local, (_p, m) => this.pushLog(`[Blockhost] ${m}`));
     await fsp.chmod(local, 0o755);
     return local;
@@ -170,7 +172,9 @@ class PlayitService {
     await fsp.mkdir(config.playitDir, { recursive: true });
     const claimed = await this.isClaimed();
     this.setState(claimed ? 'starting' : 'claiming');
-    const args = config.playitArgs ? config.playitArgs.split(/\s+/).filter(Boolean) : ['--stdout', '--secret_path', this.secretPath, 'start'];
+    const args = config.playitArgs
+      ? config.playitArgs.split(/\s+/).filter(Boolean)
+      : ['--stdout', '--secret_path', this.secretPath, ...(config.inDocker ? ['--platform_docker'] : []), 'start'];
     this.pushLog(`[Blockhost] $ ${path.basename(this.binary)} ${args.join(' ')}`);
     const proc = spawn(this.binary, args, { cwd: config.playitDir, env: { ...process.env, NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     this.proc = proc;

@@ -76,7 +76,9 @@ Bedrock Dedicated Server is x86_64-only. The ARM image bundles [box64](https://g
 2. Click **Open claim page**, sign in to playit.gg (free) and approve the agent. The secret is stored in `data/playit/playit.toml`.
 3. Pick a server and **Create tunnel**. A `*.joinmc.link`-style address appears here and on the server's page. Java tunnels are TCP; Bedrock and Geyser tunnels are UDP.
 
-Tunnels created on the playit website also show up as long as they point at `127.0.0.1:<server port>`. Other tunnel services (ngrok TCP, Cloudflare Tunnel, Tailscale) can target the same ports from a sidecar.
+Tunnels created on the playit website also show up as long as they point at `127.0.0.1:<server port>`.
+
+The bundled agent is pinned to playit **0.15.26**, the last single-binary release whose `start` command prints the claim link and stores the secret itself (`PLAYIT_VERSION` build arg / `MCSM_PLAYIT_VERSION` env). playit 1.x split into a `playitd` daemon plus an IPC frontend; supporting that is a planned follow-up. Other tunnel services (ngrok TCP, Cloudflare Tunnel, Tailscale) can target the same ports from a sidecar.
 
 ## How updates work
 
@@ -88,7 +90,7 @@ Downloads are cached in `data/cache`, so re-creating a server on the same versio
 
 ## Docker image
 
-The image is published as **`iamfaraz/minecraft-server-manager`** for `linux/amd64` (x86_64 servers) and `linux/arm64` (Apple Silicon Macs, ARM boards). `docker compose up -d` pulls it; `docker compose up -d --build` builds from source. Override the name with `MCSM_IMAGE` / `MCSM_IMAGE_TAG` in `.env`.
+The image is published as **`imfaraz/minecraft-server-manager`** for `linux/amd64` (x86_64 servers) and `linux/arm64` (Apple Silicon Macs, ARM boards). `docker compose up -d` pulls it; `docker compose up -d --build` builds from source. Override the name with `MCSM_IMAGE` / `MCSM_IMAGE_TAG` in `.env`.
 
 Publish a new version yourself:
 

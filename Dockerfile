@@ -22,6 +22,9 @@ LABEL org.opencontainers.image.title="Blockhost — Minecraft server manager" \
       org.opencontainers.image.source="https://github.com/iamfaraz/minecraft-server-manager"
 ARG TARGETARCH
 ARG MCSM_VERSION=dev
+# playit agent release to bundle. 0.15.x is the last single-binary CLI that prints a claim link and writes the
+# secret itself; 1.x split into a daemon + IPC frontend and needs a different (not yet supported) claim flow.
+ARG PLAYIT_VERSION=v0.15.26
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,7 +54,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 
 # playit.gg agent for remote play (falls back to a runtime download if this fails)
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo amd64) \
-    && ( curl -fsSL -o /usr/local/bin/playit "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-${ARCH}" \
+    && ( curl -fsSL -o /usr/local/bin/playit "https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}/playit-linux-${ARCH}" \
          && chmod +x /usr/local/bin/playit ) \
     || echo "WARNING: playit download failed; it will be fetched at runtime when enabled"
 

@@ -2,7 +2,7 @@ services:
   blockhost:
     # Published multi-arch image (linux/amd64 + linux/arm64). `docker compose up -d` pulls it;
     # `docker compose up -d --build` builds from source instead.
-    image: ${MCSM_IMAGE:-iamfaraz/minecraft-server-manager}:${MCSM_IMAGE_TAG:-latest}
+    image: ${MCSM_IMAGE:-imfaraz/minecraft-server-manager}:${MCSM_IMAGE_TAG:-latest}
     build: .
     container_name: blockhost
     restart: unless-stopped

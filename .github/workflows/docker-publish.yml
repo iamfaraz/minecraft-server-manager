@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'iamfaraz/minecraft-server-manager' }}
+  IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'imfaraz/minecraft-server-manager' }}
 
 jobs:
   build-and-push:

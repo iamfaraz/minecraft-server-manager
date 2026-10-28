@@ -3,12 +3,12 @@
 # and push it to Docker Hub.
 #
 # Usage: ./publish.sh [tag]            (default tag: version from server/package.json, also tags :latest)
-#   MCSM_IMAGE=you/name ./publish.sh   (override image name; defaults to .env or iamfaraz/minecraft-server-manager)
+#   MCSM_IMAGE=you/name ./publish.sh   (override image name; defaults to .env or imfaraz/minecraft-server-manager)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 [ -f .env ] && set -a && . ./.env && set +a
-IMAGE="${MCSM_IMAGE:-iamfaraz/minecraft-server-manager}"
+IMAGE="${MCSM_IMAGE:-imfaraz/minecraft-server-manager}"
 VERSION="${1:-$(node -p "require('./server/package.json').version" 2>/dev/null || echo dev)}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 

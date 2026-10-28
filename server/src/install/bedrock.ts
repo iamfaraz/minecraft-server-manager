@@ -74,6 +74,8 @@ export async function syncBedrockProperties(rec: ServerRecord, root: string, ini
   }
   // With RakNet, LAN visibility makes BDS also bind the default 19132/19133 — only allow it for the server that owns them.
   pf.set('enable-lan-visibility', transport === 'nethernet' || rec.port === 19132 ? 'true' : 'false');
+  // BDS refuses to start with allow-list=true while online-mode=false.
+  if (pf.get('online-mode') === 'false' && pf.get('allow-list') === 'true') pf.set('allow-list', 'false');
   pf.set('level-name', rec.levelName);
   await pf.save();
 }
