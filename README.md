@@ -5,6 +5,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **One container.** The manager, every Minecraft server process, the Java runtimes and the playit.gg agent all live in one container with one data volume.
 - **Java flavors:** Vanilla, Paper, Purpur, Fabric, Forge, NeoForge. **Bedrock:** official Bedrock Dedicated Server (release or preview). Version catalogs come straight from Mojang, PaperMC, PurpurMC, FabricMC, Forge and NeoForge.
 - **Correct Java every time.** The required Java major is read from Mojang's version metadata (e.g. 26.x → Java 25, 1.21 → 21, 1.20.4 → 17, ≤1.16 → 8). Java 21 and 25 are bundled; other versions download from Adoptium on demand. Override per server if you want.
+- **Two-factor login** (TOTP via QR code or setup key, with recovery codes).
 - **Import any world.** Upload a `.zip`/`.mcworld`, upload a folder from your browser, or drop a world into `data/imports/` on the host, then create a new server from it. Java and Bedrock worlds are detected automatically (including Paper-style nether/end folders).
 - **Update in place or branch off.** Change a server's version/flavor while keeping its world, configs, plugins and mods (a world backup is taken first), or create a brand-new server on another version and import the world from an existing server or one of its backups.
 - **Safe hot backups.** Running servers are frozen through the proper console pipeline (`save-off`/`save-all flush` on Java, `save hold`/`save query` with byte-exact truncation on Bedrock) so backups are consistent without kicking anyone. Manual and scheduled, with retention.
@@ -136,5 +137,7 @@ data/     (created at runtime) servers/<id>/{server.json,root/,backups/}, runtim
 ## Security notes
 
 - Single admin account (bcrypt), HMAC-signed session cookie, all API and websocket routes require it. Put the UI behind HTTPS (reverse proxy) if you expose it beyond your LAN.
+- Optional **two-factor authentication** (System → Two-factor authentication): TOTP compatible with Google Authenticator, Authy, 1Password, Bitwarden etc., enrolled by QR code or setup key, with 8 one-time recovery codes. Codes are replay-protected and failed logins are rate-limited per IP.
+- Existing sessions are invalidated when the token format changes; just sign in again.
 - The file manager and addon installers are jailed to each server's directory (path normalisation + realpath checks). Uploads are capped at 2 GB.
 - Processes run as `PUID:PGID` (default 1000:1000), never as root after startup.

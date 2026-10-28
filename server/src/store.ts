@@ -6,7 +6,11 @@ import { readJson, writeJson } from './util.js';
 
 export interface AppConfig {
   secret: string;
-  admin?: { username: string; passwordHash: string };
+  admin?: {
+    username: string;
+    passwordHash: string;
+    totp?: { secret: string; enabled: boolean; pendingSecret?: string; recoveryHashes: string[]; lastCounter?: number; enabledAt?: string };
+  };
   playit: { enabled: boolean };
   createdAt: string;
 }

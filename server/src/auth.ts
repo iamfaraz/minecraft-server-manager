@@ -3,29 +3,115 @@ import bcrypt from 'bcryptjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getAppConfig, saveAppConfig } from './store.js';
 import { HttpError } from './util.js';
+import { generateRecoveryCodes, generateSecret, hashRecovery, otpauthUrl, verifyTotp } from './totp.js';
+import QRCode from 'qrcode';
 
 const COOKIE = 'mcsm_session';
 const TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const MFA_TTL_MS = 5 * 60 * 1000;
+const ISSUER = 'Blockhost';
 
 function sign(payload: string): string {
   return crypto.createHmac('sha256', getAppConfig().secret).update(payload).digest('base64url');
 }
 
-export function issueToken(username: string): string {
-  const exp = Date.now() + TTL_MS;
-  const payload = `${Buffer.from(username).toString('base64url')}.${exp}`;
+function issue(scope: 's' | 'mfa', username: string, ttl: number): string {
+  const exp = Date.now() + ttl;
+  const payload = `${scope}.${Buffer.from(username).toString('base64url')}.${exp}`;
   return `${payload}.${sign(payload)}`;
 }
-
-export function verifyToken(token: string | undefined): string | null {
+function verify(scope: 's' | 'mfa', token: string | undefined): string | null {
   if (!token) return null;
   const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  const payload = `${parts[0]}.${parts[1]}`;
+  if (parts.length !== 4 || parts[0] !== scope) return null;
+  const payload = `${parts[0]}.${parts[1]}.${parts[2]}`;
   const expected = sign(payload);
-  if (expected.length !== parts[2].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts[2]))) return null;
-  if (Number(parts[1]) < Date.now()) return null;
-  return Buffer.from(parts[0], 'base64url').toString();
+  if (expected.length !== parts[3].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts[3]))) return null;
+  if (Number(parts[2]) < Date.now()) return null;
+  return Buffer.from(parts[1], 'base64url').toString();
+}
+
+export const issueToken = (username: string) => issue('s', username, TTL_MS);
+export const verifyToken = (token: string | undefined) => verify('s', token);
+/** Short-lived token proving the password step passed; exchanged for a session after the TOTP step. */
+export const issueMfaToken = (username: string) => issue('mfa', username, MFA_TTL_MS);
+export const verifyMfaToken = (token: string | undefined) => verify('mfa', token);
+
+/* ---------------------------- Two-factor (TOTP) ---------------------------- */
+
+export function totpEnabled(): boolean {
+  return !!getAppConfig().admin?.totp?.enabled;
+}
+
+/** Start enrolment: generate a pending secret and return QR + manual key. Not active until confirmed. */
+export async function totpBeginSetup(): Promise<{ secret: string; otpauthUrl: string; qrDataUrl: string; issuer: string; account: string }> {
+  const admin = getAppConfig().admin;
+  if (!admin) throw new HttpError(409, 'Not set up');
+  const secret = generateSecret();
+  admin.totp = { ...(admin.totp || { secret: '', enabled: false, recoveryHashes: [] }), pendingSecret: secret };
+  await saveAppConfig();
+  const url = otpauthUrl(ISSUER, admin.username, secret);
+  const qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 240, color: { dark: '#e6edf3', light: '#0f141b' } });
+  return { secret, otpauthUrl: url, qrDataUrl, issuer: ISSUER, account: admin.username };
+}
+
+/** Confirm enrolment with a code from the app; returns one-time recovery codes. */
+export async function totpConfirm(code: string): Promise<string[]> {
+  const admin = getAppConfig().admin;
+  const pending = admin?.totp?.pendingSecret;
+  if (!admin || !pending) throw new HttpError(409, 'Start the 2FA setup first');
+  const counter = verifyTotp(pending, code);
+  if (counter === null) throw new HttpError(400, 'That code is not valid. Check the time on your device and try again.');
+  const codes = generateRecoveryCodes();
+  admin.totp = { secret: pending, enabled: true, recoveryHashes: codes.map(hashRecovery), lastCounter: counter, enabledAt: new Date().toISOString() };
+  await saveAppConfig();
+  return codes;
+}
+
+export async function totpDisable(password: string, code: string): Promise<void> {
+  const admin = getAppConfig().admin;
+  if (!admin) throw new HttpError(409, 'Not set up');
+  if (!(await bcrypt.compare(password, admin.passwordHash))) throw new HttpError(403, 'Password is incorrect');
+  if (admin.totp?.enabled && !(await consumeSecondFactor(code))) throw new HttpError(403, 'Invalid authentication code');
+  delete admin.totp;
+  await saveAppConfig();
+}
+
+/** Accepts a TOTP code (replay-protected) or an unused recovery code. */
+export async function consumeSecondFactor(code: string): Promise<boolean> {
+  const admin = getAppConfig().admin;
+  const t = admin?.totp;
+  if (!admin || !t?.enabled) return false;
+  const trimmed = (code || '').trim();
+  if (/^\d{6}$/.test(trimmed.replace(/\s+/g, ''))) {
+    const counter = verifyTotp(t.secret, trimmed);
+    if (counter === null) return false;
+    if (t.lastCounter !== undefined && counter <= t.lastCounter) return false; // replay within the window
+    t.lastCounter = counter;
+    await saveAppConfig();
+    return true;
+  }
+  const h = hashRecovery(trimmed);
+  const idx = t.recoveryHashes.indexOf(h);
+  if (idx === -1) return false;
+  t.recoveryHashes.splice(idx, 1);
+  await saveAppConfig();
+  return true;
+}
+
+export function totpStatus(): { enabled: boolean; recoveryCodesLeft: number; enabledAt?: string } {
+  const t = getAppConfig().admin?.totp;
+  return { enabled: !!t?.enabled, recoveryCodesLeft: t?.enabled ? t.recoveryHashes.length : 0, enabledAt: t?.enabledAt };
+}
+
+export async function regenerateRecoveryCodes(code: string): Promise<string[]> {
+  const admin = getAppConfig().admin;
+  if (!admin?.totp?.enabled) throw new HttpError(409, '2FA is not enabled');
+  if (!(await consumeSecondFactor(code))) throw new HttpError(403, 'Invalid authentication code');
+  const codes = generateRecoveryCodes();
+  admin.totp.recoveryHashes = codes.map(hashRecovery);
+  await saveAppConfig();
+  return codes;
 }
 
 export function setupRequired(): boolean {
