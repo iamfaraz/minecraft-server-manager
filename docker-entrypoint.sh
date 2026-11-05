@@ -8,7 +8,8 @@ export HOME="${HOME:-/data/.home}"
 if [ "$(id -u)" = "0" ]; then
   # Local time for the manager and every server process (log timestamps, scheduled backups).
   if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
-    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
+    # Non-fatal: /etc/localtime may be a read-only mount from the host; the TZ variable alone is enough.
+    { ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone; } 2>/dev/null || true
     echo "[entrypoint] timezone $TZ"
   elif [ -n "${TZ:-}" ]; then
     echo "[entrypoint] unknown timezone '$TZ', staying on UTC"; unset TZ

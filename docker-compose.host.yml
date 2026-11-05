@@ -2,6 +2,8 @@
 # work without NAT tricks, and server ports no longer need to be published in advance.
 #   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 # deploy.sh enables this automatically on Linux by writing COMPOSE_FILE into .env.
+# Everything else (TZ, PUID/PGID, data volume, memory limit, port ranges the manager allocates from) is inherited
+# from docker-compose.yml. Open the ranges in MCSM_JAVA_PORTS / MCSM_BEDROCK_PORTS in your firewall if you use one.
 services:
   blockhost:
     network_mode: host
