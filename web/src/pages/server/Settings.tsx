@@ -180,13 +180,25 @@ export function Settings({ s }: { s: ServerSummary }) {
             <div className="space-y-4">
               <Toggle checked={form.geyser} onChange={(v) => setForm({ ...form, geyser: v })} label="Allow Bedrock players to join" description="Installs Geyser and Floodgate into this server. Bedrock players connect over UDP on the port below." />
               {form.geyser && (
-                <Field label="Bedrock port (UDP)" hint="Applied to Geyser's config.yml on each start. Leave empty to auto-assign.">
+                <Field
+                  label="Bedrock port"
+                  hint={`Players use this port. Geyser gets it from the first start: RakNet on UDP ${form.geyserPort || 'N'}, NetherNet signaling on TCP ${form.geyserPort || 'N'}, and NetherNet data on UDP ${form.geyserPort ? Number(form.geyserPort) + 1 : 'N+1'}. Leave empty to auto-assign.`}
+                >
                   <input className="input font-mono" value={form.geyserPort} onChange={(e) => setForm({ ...form, geyserPort: e.target.value.replace(/\D/g, '') })} />
                 </Field>
+              )}
+              {s.geyser && s.state === 'running' && (
+                <p className={s.geyserPing?.ok ? 'text-xs text-emerald-300' : 'text-xs text-amber-300'}>
+                  {s.geyserPing?.ok
+                    ? `Geyser is answering Bedrock pings${s.geyserPing.version ? ` (advertising Bedrock ${s.geyserPing.version})` : ''}.`
+                    : 'Geyser is not answering on its Bedrock port yet. If this persists, check the console: the newest Geyser build may not support this Minecraft version, or the port is blocked.'}
+                </p>
               )}
             </div>
           </Card>
         )}
+
+        {java && s.geyser && <ConsoleBroadcast s={s} />}
 
         <Card title="Scheduled backups">
           <div className="grid gap-4 sm:grid-cols-3">

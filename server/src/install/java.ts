@@ -232,25 +232,22 @@ export async function removeGeyser(rec: ServerRecord, root: string): Promise<voi
   for (const e of entries) if (/^(Geyser|floodgate)-.*\.jar$/i.test(e)) await fsp.rm(path.join(root, dir, e), { force: true });
 }
 
-/** Patch Geyser's config.yml (once generated) so its Bedrock port matches the record. */
-export async function syncGeyserPort(rec: ServerRecord, root: string): Promise<boolean> {
-  if (!rec.geyser || !rec.geyserPort) return false;
-  const dir = extensionDir(rec);
-  if (!dir) return false;
-  const candidates = [
-    path.join(root, dir, 'Geyser-Spigot', 'config.yml'),
-    path.join(root, 'config', 'Geyser-Fabric', 'config.yml'),
-    path.join(root, 'config', 'Geyser-NeoForge', 'config.yml'),
-    path.join(root, 'config', 'Geyser', 'config.yml'),
-  ];
-  for (const f of candidates) {
-    if (!(await exists(f))) continue;
-    const raw = await fsp.readFile(f, 'utf8');
-    // The first "port:" under "bedrock:" is the listen port.
-    const patched = raw.replace(/(bedrock:\s*\n(?:[ \t]+.*\n)*?[ \t]+port:\s*)\d+/, `$1${rec.geyserPort}`);
-    const patched2 = patched.replace(/(\n[ \t]+clone-remote-port:\s*)true/, '$1false');
-    if (patched2 !== raw) await fsp.writeFile(f, patched2);
-    return true;
-  }
-  return false;
+/**
+ * Geyser reads any config option from GEYSER_<PATH> environment variables (applied on every start, including the
+ * first, before config.yml exists). We set the Bedrock listener per server process:
+ *   port            RakNet (UDP) + built-in NetherNet signaling (TCP)
+ *   webrtc-port     NetherNet/WebRTC media (UDP), the next port up
+ *   transport=both  accept classic RakNet clients and NetherNet (consoles via Xbox Live, new clients)
+ */
+export function geyserEnv(rec: ServerRecord, advertiseIp: string, hostNetwork: boolean): Record<string, string> {
+  if (!rec.geyser || !rec.geyserPort) return {};
+  const env: Record<string, string> = {
+    GEYSER_BEDROCK_PORT: String(rec.geyserPort),
+    GEYSER_BEDROCK_WEBRTC_PORT: String(rec.geyserPort + 1),
+    GEYSER_BEDROCK_TRANSPORT: 'both',
+    GEYSER_BEDROCK_CLONE_REMOTE_PORT: 'false',
+  };
+  // Behind Docker's bridge the container's own addresses are unreachable; tell players where to connect.
+  if (advertiseIp && !hostNetwork) env.GEYSER_BEDROCK_SIGNALING_ADVERTISE_ADDRESSES = advertiseIp;
+  return env;
 }

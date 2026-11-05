@@ -11,7 +11,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **Update in place or branch off.** Change a server's version/flavor while keeping its world, configs, plugins and mods (a world backup is taken first), or create a brand-new server on another version and import the world from an existing server or one of its backups.
 - **Safe hot backups.** Running servers are frozen through the proper console pipeline (`save-off`/`save-all flush` on Java, `save hold`/`save query` with byte-exact truncation on Bedrock) so backups are consistent without kicking anyone. Manual and scheduled, with retention.
 - **Live console** (stdin/stdout, no RCON needed), **telemetry** (CPU, memory, players, ping via Server List Ping / RakNet), **player management** (whitelist/allowlist, ops, bans, kicks; Mojang UUID lookup; offline-mode UUIDs), **addons** (Modrinth search + one-click install with dependencies for plugins/mods; `.mcpack`/`.mcaddon` install for Bedrock), **jailed file manager** with editor, and a **server.properties** editor.
-- **Cross-play:** one toggle installs Geyser + Floodgate on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers.
+- **Cross-play:** one toggle installs Geyser + Floodgate on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers. Geyser is configured per server through its `GEYSER_*` environment overrides (port from the very first start, RakNet and NetherNet both enabled, advertised address for Docker bridge mode), its Bedrock side is health-checked, and the console broadcast toggle works for these servers too.
 - **Remote play without port forwarding:** built-in [playit.gg](https://playit.gg) agent. Enable it, claim it once in your browser, then create a tunnel per server from the UI to get a public address.
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
@@ -40,7 +40,7 @@ Docker can only publish ports when the container starts, so the compose file pub
 | Env var               | Default        | Used by                                   |
 | --------------------- | -------------- | ----------------------------------------- |
 | `MCSM_JAVA_PORTS`     | `25565-25574`  | Java servers (TCP)                        |
-| `MCSM_BEDROCK_PORTS`  | `19132-19141`  | Bedrock servers and Geyser: UDP, plus TCP for NetherNet signaling |
+| `MCSM_BEDROCK_PORTS`  | `19132-19141`  | Bedrock servers and Geyser (two consecutive ports each): UDP, plus TCP for NetherNet signaling |
 
 Widen the ranges in `.env` if you need more servers. Players on your LAN connect to `<host-ip>:<port>`; the UI shows the address on each server.
 
@@ -84,6 +84,8 @@ Consoles can't type in a server address. Under a Bedrock server's **Settings →
 1. The server is switched to NetherNet if needed (restart it once).
 2. When the server is running, a sign-in box appears: open `microsoft.com/link`, enter the code, and sign in with a **spare** Microsoft account (the broadcaster emulates parts of a game client, so don't use your main one).
 3. On the console, add that account's gamertag as a friend. Requests are accepted automatically and the server shows up under Play → Friends. Switch needs a linked Microsoft account and Nintendo Switch Online.
+
+The same card appears on Java servers that have Cross-play (Geyser) enabled; joins are then relayed to Geyser's built-in NetherNet signaling.
 
 How it works: MCXboxBroadcast holds an Xbox Live session for that account and relays each join to the server's NetherNet signaling on `127.0.0.1:<port>`; the console then connects directly to the address the server advertises (`MCSM_ADVERTISE_IP`, or the host itself with host networking). LAN consoles work out of the box. Remote consoles additionally need the server's UDP port reachable from the internet and the advertised IP set to `public`.
 

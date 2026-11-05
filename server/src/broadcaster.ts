@@ -76,7 +76,11 @@ class BroadcasterService {
   }
 
   supported(rec: ServerRecord): { ok: boolean; reason: string | null } {
-    if (rec.edition !== 'bedrock') return { ok: false, reason: 'Console broadcasting is available for Bedrock servers.' };
+    if (rec.edition === 'java') {
+      // Geyser runs NetherNet with built-in signaling on its Bedrock port, which the broadcaster relays joins to.
+      if (!rec.geyser || !rec.geyserPort) return { ok: false, reason: 'Enable Cross-play (Geyser) first; consoles join through Geyser.' };
+      return { ok: true, reason: null };
+    }
     if (rec.transport !== 'nethernet') return { ok: false, reason: 'Requires the NetherNet transport (consoles join over WebRTC).' };
     return { ok: true, reason: null };
   }
@@ -146,12 +150,18 @@ class BroadcasterService {
   }
 
   /** Create or patch config.yml so joins are relayed to this server. */
+  /** Port of the NetherNet signaling the broadcaster relays to: the Bedrock server itself, or Geyser on a Java server. */
+  targetPort(rec: ServerRecord): number {
+    return rec.edition === 'java' ? rec.geyserPort! : rec.port;
+  }
+
   private async writeConfig(inst: ServerInstance): Promise<void> {
     const dir = this.dir(inst.id);
     await fsp.mkdir(dir, { recursive: true });
     const file = path.join(dir, 'config.yml');
     const props = await PropertiesFile.load(path.join(inst.root, 'server.properties'));
-    const hostName = props.get('server-name') || inst.rec.name;
+    const hostName = (props.get('server-name') || (inst.rec.edition === 'java' ? inst.rec.name : '') || inst.rec.name).replace(/§./g, '');
+    const port = this.targetPort(inst.rec);
     const maxPlayers = Number(props.get('max-players')) || 10;
     const gm = (props.get('gamemode') || 'survival').toLowerCase();
     const gameMode = gm === 'creative' ? 'Creative' : gm === 'adventure' ? 'Adventure' : 'Survival';
@@ -159,7 +169,7 @@ class BroadcasterService {
       let raw = await fsp.readFile(file, 'utf8');
       raw = raw
         .replace(/^(\s*remote-address:).*$/m, `$1 127.0.0.1`)
-        .replace(/^(\s*remote-port:).*$/m, `$1 '${inst.rec.port}'`)
+        .replace(/^(\s*remote-port:).*$/m, `$1 '${port}'`)
         .replace(/^(\s*host-name:).*$/m, `$1 ${yamlStr(hostName)}`)
         .replace(/^(\s*world-name:).*$/m, `$1 ${yamlStr(inst.rec.levelName)}`)
         .replace(/^(\s*max-players:).*$/m, `$1 ${maxPlayers}`)
@@ -170,7 +180,7 @@ class BroadcasterService {
     const yml = `# Managed by Blockhost. remote-address/port and session-info are rewritten on every start.
 session:
   remote-address: 127.0.0.1
-  remote-port: '${inst.rec.port}'
+  remote-port: '${port}'
   update-interval: 30
   query-server: true
   config-fallback: true
@@ -224,7 +234,7 @@ config-version: ${CONFIG_VERSION}
       await this.writeConfig(inst);
       r.state = 'starting';
       this.publish(id);
-      this.push(id, `[Blockhost] Starting MCXboxBroadcast ${MCXB_VERSION} → 127.0.0.1:${inst.rec.port}`);
+      this.push(id, `[Blockhost] Starting MCXboxBroadcast ${MCXB_VERSION} → 127.0.0.1:${this.targetPort(inst.rec)}${inst.rec.edition === 'java' ? ' (Geyser)' : ''}`);
       const proc = spawn(java.path, ['-Xmx256M', '-jar', jar], { cwd: this.dir(id), env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' }, stdio: ['pipe', 'pipe', 'pipe'] });
       r.proc = proc;
       let skipping = 0;

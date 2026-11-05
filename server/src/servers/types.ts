@@ -94,6 +94,7 @@ export interface ServerSummary extends ServerRecord {
   startedAt: string | null;
   players: OnlinePlayer[];
   ping: PingResult | null;
+  geyserPing: PingResult | null;
   lastExit: { code: number | null; signal: string | null; at: string; oom: boolean } | null;
   diskBytes: number;
   lastStats: StatsSample | null;

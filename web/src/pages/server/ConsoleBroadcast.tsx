@@ -59,7 +59,8 @@ export function ConsoleBroadcast({ s }: { s: ServerSummary }) {
   });
 
   const b = q.data;
-  const needsTransport = s.transport !== 'nethernet';
+  const viaGeyser = s.edition === 'java';
+  const needsTransport = !viaGeyser && s.transport !== 'nethernet';
 
   return (
     <Card
@@ -84,7 +85,9 @@ export function ConsoleBroadcast({ s }: { s: ServerSummary }) {
             description={
               needsTransport && !b.enabled
                 ? 'Consoles cannot enter a server address. Turning this on switches the server to the NetherNet transport and broadcasts it through a Microsoft account.'
-                : 'Consoles cannot enter a server address. A Microsoft account you sign in below advertises this server; its friends can join from the Friends tab.'
+                : viaGeyser
+                  ? 'Consoles cannot enter a server address. A Microsoft account you sign in below advertises this server through Geyser; its friends can join from the Friends tab.'
+                  : 'Consoles cannot enter a server address. A Microsoft account you sign in below advertises this server; its friends can join from the Friends tab.'
             }
           />
 

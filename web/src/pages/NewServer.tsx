@@ -416,7 +416,7 @@ export function NewServer() {
                     />
                   </Field>
                   {GEYSER_OK.includes(f.type) && (
-                    <Toggle checked={f.geyser} onChange={(v) => set('geyser', v)} label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>} description="Lets phones, consoles and Windows 10/11 players join this Java server. Adds a UDP port." />
+                    <Toggle checked={f.geyser} onChange={(v) => set('geyser', v)} label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>} description="Lets phones, consoles and Windows 10/11 players join this Java server. Uses two consecutive ports from the Bedrock range (RakNet + NetherNet)." />
                   )}
                 </>
               )}

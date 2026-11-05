@@ -11,8 +11,8 @@ import { readJson, stripAnsi, which, writeJson, HttpError } from '../util.js';
 import { parseLine, type ParsedEvent } from './logparser.js';
 import type { OnlinePlayer, PingResult, ServerRecord, ServerState, ServerSummary, StatsSample } from './types.js';
 import { ensureJava } from '../versions/runtime.js';
-import { javaMajorFor, syncJavaProperties, syncGeyserPort } from '../install/java.js';
-import { syncBedrockProperties } from '../install/bedrock.js';
+import { javaMajorFor, syncJavaProperties, geyserEnv } from '../install/java.js';
+import { syncBedrockProperties, resolveAdvertiseIp } from '../install/bedrock.js';
 
 const LOG_RING = 1000;
 const STATS_RING = 180; // 15 min at 5s
@@ -51,6 +51,8 @@ export class ServerInstance extends EventEmitter {
   seen = new Map<string, SeenPlayer>();
   stats: StatsSample[] = [];
   ping: PingResult | null = null;
+  /** Bedrock-side reachability of Geyser on a Java server (RakNet ping on the Geyser port). */
+  geyserPing: PingResult | null = null;
   lastExit: ServerSummary['lastExit'] = null;
   diskBytes = 0;
   install: { pct: number | null; message: string } | null = null;
@@ -145,7 +147,16 @@ export class ServerInstance extends EventEmitter {
   private async checkPortFree(): Promise<void> {
     const ports: { port: number; udp: boolean }[] =
       this.rec.edition === 'java'
-        ? [{ port: this.rec.port, udp: false }, ...(this.rec.geyser && this.rec.geyserPort ? [{ port: this.rec.geyserPort, udp: true }] : [])]
+        ? [
+            { port: this.rec.port, udp: false },
+            ...(this.rec.geyser && this.rec.geyserPort
+              ? [
+                  { port: this.rec.geyserPort, udp: true },
+                  { port: this.rec.geyserPort + 1, udp: true },
+                  { port: this.rec.geyserPort, udp: false },
+                ]
+              : []),
+          ]
         : this.rec.transport === 'nethernet'
           ? [{ port: this.rec.port, udp: true }, { port: this.rec.port, udp: false }]
           : [{ port: this.rec.port, udp: true }, { port: this.rec.portV6 ?? this.rec.port + 1, udp: true }];
@@ -188,6 +199,7 @@ export class ServerInstance extends EventEmitter {
     }
     const major = await javaMajorFor(this.rec);
     const rt = await ensureJava(major, (p, m) => this.setProgress(p, m));
+    if (this.rec.geyser) Object.assign(env, geyserEnv(this.rec, await resolveAdvertiseIp(this.rec.advertiseIp || config.advertiseIp || ''), config.hostNetwork));
     const j = this.rec.java!;
     const args = [`-Xms${Math.min(j.xmsMb || j.xmxMb, j.xmxMb)}M`, `-Xmx${j.xmxMb}M`];
     if (j.preset === 'aikar') args.push(...aikarFlags(j.xmxMb));
@@ -219,7 +231,6 @@ export class ServerInstance extends EventEmitter {
       await this.checkPortFree();
       if (this.rec.edition === 'java') {
         await syncJavaProperties(this.rec, this.root);
-        await syncGeyserPort(this.rec, this.root);
       } else {
         await syncBedrockProperties(this.rec, this.root);
       }
@@ -354,6 +365,7 @@ export class ServerInstance extends EventEmitter {
     this.players.clear();
     this.emitPlayers();
     this.ping = null;
+    this.geyserPing = null;
     this.pushLog(`[Blockhost] Server process exited (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`);
     for (const w of this.waiters) {
       clearTimeout(w.timer);
@@ -402,6 +414,7 @@ export class ServerInstance extends EventEmitter {
       startedAt: this.isActive && this.startedAt ? this.startedAt.toISOString() : null,
       players: [...this.players.values()],
       ping: this.ping,
+      geyserPing: this.rec.geyser ? this.geyserPing : null,
       lastExit: this.lastExit,
       diskBytes: this.diskBytes,
       lastStats: this.stats[this.stats.length - 1] ?? null,

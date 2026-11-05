@@ -100,6 +100,7 @@ export class ServerManager {
             : await pingBedrock('127.0.0.1', inst.rec.port);
       inst.ping = r.ok ? r : inst.ping && !r.ok ? { ok: false } : r;
       if (r.ok && inst.state === 'starting') inst.setState('running');
+      if (inst.rec.edition === 'java' && inst.rec.geyser && inst.rec.geyserPort) inst.geyserPing = await pingBedrock('127.0.0.1', inst.rec.geyserPort, 2000);
     }
   }
 
@@ -142,7 +143,10 @@ export class ServerManager {
       if (i.id === exceptId) continue;
       used.add(i.rec.port);
       if (i.rec.portV6) used.add(i.rec.portV6);
-      if (i.rec.geyser && i.rec.geyserPort) used.add(i.rec.geyserPort);
+      if (i.rec.geyser && i.rec.geyserPort) {
+        used.add(i.rec.geyserPort);
+        used.add(i.rec.geyserPort + 1); // NetherNet/WebRTC media port
+      }
     }
     return used;
   }
@@ -219,7 +223,7 @@ export class ServerManager {
       createdAt: now,
       updatedAt: now,
     };
-    if (geyser) rec.geyserPort = this.allocatePort('udp', undefined, 1);
+    if (geyser) rec.geyserPort = this.allocatePort('udp', undefined, 2);
 
     await fsp.mkdir(serverRoot(id), { recursive: true });
     await fsp.mkdir(serverBackupsDir(id), { recursive: true });
@@ -347,16 +351,18 @@ export class ServerManager {
       if (!['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric or NeoForge');
       rec.geyser = !!patch.geyser;
       if (rec.geyser) {
-        rec.geyserPort = patch.geyserPort || rec.geyserPort || this.allocatePort('udp', id);
+        rec.geyserPort = patch.geyserPort || rec.geyserPort || this.allocatePort('udp', id, 2);
         if (rec.installed) await installGeyser(rec, inst.root, (p, m) => inst.pushLog(`[Blockhost] ${m}`));
       } else {
         await removeGeyser(rec, inst.root);
         rec.geyserPort = undefined;
+        if (rec.broadcast?.enabled) rec.broadcast = { enabled: false };
       }
       needsRestart.push('geyser');
     } else if (rec.geyser && patch.geyserPort !== undefined && patch.geyserPort !== rec.geyserPort) {
       const p = Number(patch.geyserPort);
-      if (this.usedPorts(id).has(p) || p === rec.port) throw conflict('Port already assigned');
+      const usedNow = this.usedPorts(id);
+      if (usedNow.has(p) || usedNow.has(p + 1) || p === rec.port) throw conflict('Port already assigned (Geyser needs two consecutive UDP ports)');
       rec.geyserPort = p;
       needsRestart.push('geyser');
     }
