@@ -19,6 +19,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **Remote play without port forwarding:** built-in [playit.gg](https://playit.gg) agent. Enable it, claim it once in your browser, then create a tunnel per server from the UI to get a public address.
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
+- **Armor HUD add-on for Bedrock:** held items, armour durability, arrows and free slots around the hotbar, for every Bedrock client. See *Bedrock add-on: Armor HUD* below.
 - **Bedrock transport choice:** RakNet (classic, pingable, tunnel-friendly) or NetherNet (Mojang's new WebRTC transport, the BDS default) per server.
 - Runs as your host user (`PUID`/`PGID`), so `./data` stays yours.
 
@@ -121,6 +122,30 @@ Bedrock Dedicated Server is x86_64-only. The ARM image bundles [box64](https://g
 | Permission | Player / Operator (`op`, `deop`, `ops.json`) | Default / Visitor / Member / Operator (`permissions.json` + `permission reload`); needs the player to have joined once so their Xbox ID is known |
 | Block / Unblock | The server's ban list (`ban`, `pardon`) | Blockhost-managed blocklist (`data/servers/<id>/blocklist.json`); blocked players are kicked as they join |
 | Kick | `kick` | `kick` |
+
+## Bedrock add-on: Armor HUD
+
+`addons/armor-hud/blockhost-armor-hud.mcaddon` is a Bedrock add-on that shows each player a small HUD on both sides of the hotbar, in the style of Inventory HUD+ on Java:
+
+| Left of the hotbar | Right of the hotbar |
+| --- | --- |
+| Main hand: durability, or how many of that item you carry | Off hand: durability or count (for example totems) |
+| Helmet durability | Leggings durability |
+| Chestplate durability | Boots durability |
+| Arrows carried (shown when you have arrows or a bow) | Free inventory slots |
+
+Durability is a percentage coloured from green down to red. Empty slots show nothing.
+
+**Install:** open the Bedrock server in Blockhost, go to **Add-ons**, upload the `.mcaddon` file and restart the server. It contains a behavior pack and a resource pack; both are enabled for the world. Players download the resource pack when they join, so set `texturepack-required=true` under Settings if you want everyone to have it. Works for every Bedrock client, consoles included.
+
+**How it works:** a server-side script (Script API 2.0, Bedrock 1.21.90 or newer) reads each player's equipment a few times a second and sends changes to that player as a hidden title. The resource pack keeps that title off the screen and draws its contents next to the hotbar, using the item textures already in the player's game. Ordinary titles still show, although a HUD update that arrives while one is on screen replaces it.
+
+**Change or rebuild:** the sources are in `addons/armor-hud/src`. The HUD layout is generated, so positions and sizes are the constants at the top of `build.mjs`.
+
+```bash
+node addons/armor-hud/build.mjs   # writes the .mcaddon (needs the zip command)
+node addons/armor-hud/test.mjs    # checks the script logic and the generated HUD expressions
+```
 
 ## Remote play (playit.gg)
 
