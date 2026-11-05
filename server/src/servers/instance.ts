@@ -445,6 +445,10 @@ export class ServerInstance extends EventEmitter {
     if (!hidden) this.pushLog(line);
     for (const t of this.taps) t(line);
     if (/OutOfMemoryError/.test(line)) this.lastOom = true;
+    // Bedrock prints this when it runs on RakNet but its version only lets players in over NetherNet.
+    if (/NetherNet is the only supported transport type/.test(line)) {
+      this.pushLog('[Blockhost] This Bedrock version only accepts players over NetherNet, so nobody can join right now. Set Network transport to NetherNet under Settings and restart the server.');
+    }
     const ev = parseLine(this.rec.edition, line);
     if (ev) this.handleEvent(ev);
     if (this.waiters.length) {

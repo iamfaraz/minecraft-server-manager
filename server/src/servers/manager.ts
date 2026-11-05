@@ -210,7 +210,8 @@ export class ServerManager {
       version: input.version.trim(),
       port,
       portV6: edition === 'bedrock' ? port + 1 : undefined,
-      transport: edition === 'bedrock' ? (input.transport === 'nethernet' ? 'nethernet' : 'raknet') : undefined,
+      // NetherNet unless RakNet is asked for: current Bedrock servers (seen on 1.26.62) refuse players over RakNet.
+      transport: edition === 'bedrock' ? (input.transport === 'raknet' ? 'raknet' : 'nethernet') : undefined,
       levelName,
       java,
       autoStart: !!input.autoStart,

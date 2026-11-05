@@ -20,7 +20,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
 - **Armor HUD add-on for Bedrock:** held items, armour durability, arrows and free slots around the hotbar, for every Bedrock client. See *Bedrock add-on: Armor HUD* below.
-- **Bedrock transport choice:** RakNet (classic, pingable, tunnel-friendly) or NetherNet (Mojang's new WebRTC transport, the BDS default) per server.
+- **Bedrock transport choice:** NetherNet (Mojang's WebRTC transport, required by current Bedrock versions) or RakNet (the classic protocol, for older versions) per server.
 - Runs as your host user (`PUID`/`PGID`), so `./data` stays yours.
 
 Tested target: x86_64 Ubuntu (e.g. an i5 with 16 GB RAM). The image is also built for arm64 (Bedrock via box64).
@@ -68,9 +68,9 @@ Server logs, the console and scheduled backups use the container's timezone. `de
 
 ### Bedrock transport: RakNet vs NetherNet
 
-Recent Bedrock Dedicated Server builds default to **NetherNet**, Mojang's WebRTC-based transport, with the classic **RakNet** UDP protocol still available. Each Bedrock server has a transport switch (wizard and Settings):
+Bedrock Dedicated Server has moved to **NetherNet**, Mojang's WebRTC-based transport. Current versions accept players only over NetherNet: on 1.26.62 a server set to the classic **RakNet** UDP protocol still starts, but prints a `TRANSPORT TYPE ERROR` and nobody can join. New servers are therefore created on NetherNet, and Blockhost adds its own console message if a server hits that error. RakNet remains selectable (wizard and Settings) for older Bedrock versions:
 
-| | RakNet (default here) | NetherNet |
+| | RakNet (older versions only) | NetherNet (default) |
 | --- | --- | --- |
 | Ports | 2 UDP (IPv4 + IPv6) | 1 port, UDP (WebRTC data) **and TCP** (signaling) |
 | Status ping / MOTD / player count | Yes (RakNet unconnected ping) | Reachability + latency only (TCP probe) |

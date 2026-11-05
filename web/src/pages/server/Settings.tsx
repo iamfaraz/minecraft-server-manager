@@ -26,7 +26,7 @@ export function Settings({ s }: { s: ServerSummary }) {
     restartOnCrash: s.restartOnCrash,
     geyser: s.geyser,
     geyserPort: String(s.geyserPort || ''),
-    transport: s.transport || 'raknet',
+    transport: s.transport || 'raknet', // records from before the transport setting existed ran on RakNet
     advertiseIp: s.advertiseIp || '',
     xmxMb: s.java?.xmxMb || 2048,
     xmsMb: s.java?.xmsMb || s.java?.xmxMb || 2048,
@@ -114,8 +114,8 @@ export function Settings({ s }: { s: ServerSummary }) {
               </Field>
             </div>
             {!java && (
-              <Field label="Network transport" hint={form.transport === 'raknet' ? 'Classic UDP protocol: status pings, LAN discovery and tunnels all work. Needs two UDP ports.' : 'WebRTC transport (BDS default). One port on UDP + TCP; pings only report reachability. Behind NAT the advertised IP below is written into server-udp-ports.'}>
-                <Segmented value={form.transport} onChange={(v) => setForm({ ...form, transport: v })} options={[{ value: 'raknet', label: 'RakNet' }, { value: 'nethernet', label: 'NetherNet' }]} />
+              <Field label="Network transport" hint={form.transport === 'raknet' ? 'Only for older Bedrock versions: current servers (seen on 1.26.62) refuse players over RakNet. Needs two UDP ports.' : 'WebRTC transport, required by current Bedrock versions. One port on UDP + TCP; pings only report reachability. Behind NAT the advertised IP below is written into server-udp-ports.'}>
+                <Segmented value={form.transport} onChange={(v) => setForm({ ...form, transport: v })} options={[{ value: 'nethernet', label: 'NetherNet' }, { value: 'raknet', label: 'RakNet (legacy)' }]} />
               </Field>
             )}
             {!java && form.transport === 'nethernet' && !sys?.network?.hostNetwork && (

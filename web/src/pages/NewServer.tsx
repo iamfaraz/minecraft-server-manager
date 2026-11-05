@@ -72,7 +72,7 @@ export function NewServer() {
       javaMajor: 'auto',
       preset: 'aikar',
       geyser: false,
-      transport: 'raknet',
+      transport: 'nethernet',
       autoStart: false,
       restartOnCrash: true,
       startAfterInstall: true,
@@ -386,8 +386,8 @@ export function NewServer() {
                 )}
               </div>
               {!isJava && (
-                <Field label="Network transport" hint={f.transport === 'raknet' ? 'Classic UDP protocol. Works with every Bedrock client, status pings, LAN discovery and playit tunnels. Uses two UDP ports (IPv4 + IPv6).' : "Mojang's WebRTC-based transport, the default in recent BDS builds. Uses one port on UDP and TCP; pings only report reachability, and behind NAT the server must advertise the IP players use (set automatically from MCSM_ADVERTISE_IP, editable in Settings)."}>
-                  <Segmented value={f.transport} onChange={(v) => set('transport', v)} options={[{ value: 'raknet', label: 'RakNet (recommended)' }, { value: 'nethernet', label: 'NetherNet' }]} />
+                <Field label="Network transport" hint={f.transport === 'raknet' ? 'Only for older Bedrock versions. Current servers (seen on 1.26.62) refuse players over RakNet and say so in the console. Uses two UDP ports (IPv4 + IPv6).' : "Mojang's WebRTC-based transport, required by current Bedrock versions. Uses one port on UDP and TCP; pings only report reachability, and behind NAT the server must advertise the IP players use (set automatically from MCSM_ADVERTISE_IP, editable in Settings)."}>
+                  <Segmented value={f.transport} onChange={(v) => set('transport', v)} options={[{ value: 'nethernet', label: 'NetherNet (recommended)' }, { value: 'raknet', label: 'RakNet (legacy)' }]} />
                 </Field>
               )}
               {isJava && (
