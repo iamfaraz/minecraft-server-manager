@@ -1,15 +1,28 @@
 /**
- * Turns raw server log lines into terminal output, folding consecutive repeats of the same message into one line
- * with a counter: `[17:19:41 INFO] Running AutoCompaction... [x6]`. The first occurrence (and its timestamp) stays.
- * Only the console view is affected; the server's log files keep every line.
+ * Turns raw server log lines into terminal output, folding consecutive repeats of the same message into two lines:
+ * the first occurrence, then the newest repeat with a count of the repeats it stands for.
+ *   [17:19:41 INFO] Running AutoCompaction...
+ *   [17:37:41 INFO] Running AutoCompaction... [x3]
+ * So the console shows when a run started and when it last happened. Only the view is affected; nothing is dropped
+ * from the server's log files.
  */
 
 const DIM = '\x1b[38;5;245m';
+const BLUE = '\x1b[38;5;75m';
+const BOLD = '\x1b[1m';
 const RESET = '\x1b[0m';
+
+/** Invisible mark the backend puts in front of Blockhost's own lines (see server/src/servers/hostlog.ts). */
+const HOST_MARK = '\u200b';
+
+/** Blockhost's own lines: blue throughout, with banner rules and titles (`===== TITLE =====`) in bold. */
+function colorizeHost(line: string): string {
+  return `${/={6,}/.test(line) ? BOLD : ''}${BLUE}${line}${RESET}`;
+}
 
 export function colorize(line: string): string {
   if (line.startsWith('> ')) return `\x1b[38;5;114m${line}${RESET}`;
-  if (line.startsWith('[Blockhost]')) return `\x1b[38;5;75m${line}${RESET}`;
+  if (line.startsWith('[Blockhost]')) return colorizeHost(line);
   if (/\b(ERROR|SEVERE|FATAL|Exception|Caused by)\b/.test(line)) return `\x1b[38;5;203m${line}${RESET}`;
   if (/\b(WARN|WARNING)\b/.test(line)) return `\x1b[38;5;221m${line}${RESET}`;
   if (/joined the game|Player connected|logged in/.test(line)) return `\x1b[38;5;114m${line}${RESET}`;
@@ -37,7 +50,9 @@ export interface LineWriter {
 }
 
 export function createLineWriter(): LineWriter {
-  let last: { key: string; line: string; count: number } | null = null;
+  // `latest` is the newest repeat of the run's first line and `repeats` how many repeats it stands for (0 = none yet).
+  let last: { key: string; latest: string; host: boolean; repeats: number } | null = null;
+  const paint = (line: string, host: boolean) => (host ? colorizeHost(line) : colorize(line));
 
   return {
     reset() {
@@ -45,20 +60,31 @@ export function createLineWriter(): LineWriter {
     },
     render(lines, cols, rows) {
       let out = '';
-      for (const line of lines) {
+      for (const raw of lines) {
+        const host = raw.startsWith(HOST_MARK);
+        const line = host ? raw.slice(HOST_MARK.length) : raw;
         const key = repeatKey(line);
-        if (last && last.key === key && line.trim() && PLAIN.test(last.line)) {
-          // The previous line is already on screen: step back up over the rows it occupies and redraw it.
-          const shown = last.count > 1 ? `${last.line} [x${last.count}]` : last.line;
+        if (last && last.key === key && line.trim()) {
+          if (last.repeats === 0) {
+            // First repeat: it gets its own line under the first occurrence, which stays as it is.
+            last.latest = line;
+            last.repeats = 1;
+            out += `${paint(line, host)}\r\n`;
+            continue;
+          }
+          // Later repeats replace that second line, so it always shows the newest timestamp and the running count.
+          // Redrawing in place means stepping back up over the rows it occupies now.
+          const shown = last.repeats > 1 ? `${last.latest} [x${last.repeats}]` : last.latest;
           const height = Math.max(1, Math.ceil(shown.length / Math.max(1, cols)));
-          if (height < rows) {
-            last.count++;
-            out += `\x1b[${height}A\r\x1b[J${colorize(last.line)} ${DIM}[x${last.count}]${RESET}\r\n`;
+          if (PLAIN.test(shown) && PLAIN.test(line) && height < rows) {
+            last.latest = line;
+            last.repeats++;
+            out += `\x1b[${height}A\r\x1b[J${paint(line, host)} ${DIM}[x${last.repeats}]${RESET}\r\n`;
             continue;
           }
         }
-        last = { key, line, count: 1 };
-        out += `${colorize(line)}\r\n`;
+        last = { key, latest: line, host, repeats: 0 };
+        out += `${paint(line, host)}\r\n`;
       }
       return out;
     },

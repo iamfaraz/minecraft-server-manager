@@ -261,7 +261,14 @@ config-version: ${CONFIG_VERSION}
           r.state = 'online';
           r.error = null;
           this.publish(id);
-          inst.pushLog(`[Blockhost] Console broadcast is live${r.gamertag ? ` as "${r.gamertag}"` : ''}. Console players: add that account as a friend and join from the Friends tab.`);
+          // MCXboxBroadcast reports the account as `Gamertag (xuid) with 1/1000 friends`.
+          const acct = /^(.+?)\s*\(\d+\)(?:\s+with\s+(\S+)\s+friends)?/.exec(r.gamertag || '');
+          const who = acct?.[1] || r.gamertag;
+          inst.banner('Console broadcast', [
+            who ? `Live on Xbox as ${who}${acct?.[2] ? ` (${acct[2]} friends)` : ''}.` : 'Live on Xbox.',
+            `Console players: add ${who || 'that account'} as a friend,`,
+            'then join from the Friends tab.',
+          ]);
         } else if (/Failed to ping server/.test(line)) {
           r.warning = 'The broadcaster could not reach the server over NetherNet yet.';
           this.publish(id);

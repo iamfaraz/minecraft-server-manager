@@ -9,12 +9,14 @@ import { bus } from '../events.js';
 import { serverRoot, serverDir, serverRecordFile } from '../store.js';
 import { readJson, stripAnsi, which, writeJson, HttpError } from '../util.js';
 import { parseLine, type ParsedEvent } from './logparser.js';
+import { HOST_MARK, bannerLines, defaultStyle, detectStyle, hostPrefix, levelFor, type HostLevel, type LogStyle } from './hostlog.js';
 import type { OnlinePlayer, PingResult, ServerRecord, ServerState, ServerSummary, StatsSample } from './types.js';
 import { ensureJava } from '../versions/runtime.js';
 import { javaMajorFor, syncJavaProperties, geyserEnv } from '../install/java.js';
 import { syncBedrockProperties, resolveAdvertiseIp } from '../install/bedrock.js';
 
 const LOG_RING = 1000;
+const HOST_TAG = '[Blockhost] ';
 const STATS_RING = 180; // 15 min at 5s
 
 export interface BlockedPlayer {
@@ -54,6 +56,9 @@ export class ServerInstance extends EventEmitter {
   proc: ChildProcess | null = null;
   startedAt: Date | null = null;
   logs: string[] = [];
+  /** Log format this server prints in, learned from its own output; Blockhost's lines copy it. */
+  private logStyle: LogStyle | null = null;
+  private logStyleSeen = false;
   players = new Map<string, OnlinePlayer>();
   seen = new Map<string, SeenPlayer>();
   stats: StatsSample[] = [];
@@ -154,10 +159,25 @@ export class ServerInstance extends EventEmitter {
     bus.publish({ type: 'server.progress', id: this.id, pct, message });
   }
 
+  /**
+   * Add a line to the console. Lines starting with "[Blockhost] " are ours: they are rewritten with the same
+   * timestamp prefix the server uses, so they line up with its output (the UI paints them blue).
+   */
   pushLog(line: string) {
+    if (line.startsWith(HOST_TAG)) line = this.hostLine(line.slice(HOST_TAG.length));
     this.logs.push(line);
     if (this.logs.length > LOG_RING) this.logs.splice(0, this.logs.length - LOG_RING);
     bus.publish({ type: 'server.log', id: this.id, line });
+  }
+
+  /** A titled block of Blockhost lines, like the banners the servers print themselves. */
+  banner(title: string, body: string[]) {
+    const now = new Date();
+    for (const text of bannerLines(title, body)) this.pushLog(this.hostLine(text, 'INFO', now));
+  }
+
+  private hostLine(message: string, level: HostLevel = levelFor(message), at = new Date()): string {
+    return HOST_MARK + hostPrefix(this.logStyle ?? defaultStyle(this.rec), level, at) + message;
   }
 
   /** Wait for a parsed event or a raw line matching a predicate. */
@@ -277,6 +297,7 @@ export class ServerInstance extends EventEmitter {
       }
       const { cmd, args, env } = await this.buildCommand();
       this.install = null;
+      this.logStyleSeen = false; // the version or flavor may have changed since the last run
       this.pushLog(`[Blockhost] Starting: ${path.basename(cmd)} ${args.join(' ')}`);
       const proc = spawn(cmd, args, { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.proc = proc;
@@ -341,6 +362,13 @@ export class ServerInstance extends EventEmitter {
   }
 
   private onLine(line: string) {
+    if (!this.logStyleSeen) {
+      const style = detectStyle(line);
+      if (style) {
+        this.logStyle = style;
+        this.logStyleSeen = true;
+      }
+    }
     const hidden = this.muted && Date.now() < this.muted.until && this.muted.re.test(line);
     if (!hidden) this.pushLog(line);
     for (const t of this.taps) t(line);

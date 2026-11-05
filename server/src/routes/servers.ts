@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import { requireAuth } from '../auth.js';
 import { manager } from '../servers/manager.js';
+import { HOST_MARK } from '../servers/hostlog.js';
 import { bad, PropertiesFile } from '../util.js';
 import type { CreateServerInput, ServerRecord, ServerType } from '../servers/types.js';
 import { playit } from '../playit.js';
@@ -62,7 +63,7 @@ export async function serverRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string }; Querystring: { tail?: string } }>('/api/servers/:id/logs', async (req) => {
     const inst = manager.get(req.params.id);
     const n = Math.min(Number(req.query.tail || 500), 1000);
-    return { lines: inst.logs.slice(-n) };
+    return { lines: inst.logs.slice(-n).map((l) => (l.startsWith(HOST_MARK) ? l.slice(HOST_MARK.length) : l)) };
   });
 
   app.get<{ Params: { id: string } }>('/api/servers/:id/stats', async (req) => ({ samples: manager.get(req.params.id).stats }));
