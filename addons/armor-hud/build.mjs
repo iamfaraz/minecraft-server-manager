@@ -6,8 +6,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ICON_W, PAD, PREFIX, SLOTS, SLOT_W } from './src/behavior/scripts/layout.js';
-import { emptyPayload } from './src/behavior/scripts/hud.js';
+import { MARKER, SLOTS, TEXT_KEY, TEXT_W, iconKey } from './src/behavior/scripts/layout.js';
+import { initialIcon, initialText } from './src/behavior/scripts/hud.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'blockhost-armor-hud.mcaddon');
@@ -24,42 +24,49 @@ const FROM_CENTRE = 106;
 /** Lifts the columns so the bottom row is level with the hotbar. */
 const BOTTOM = -2;
 
-/* ---- expressions the HUD uses to cut one field out of the stored title ---- */
+/* ---- how the HUD reads the hidden titles ---- */
 const byteLength = (s) => Buffer.byteLength(s, 'utf8');
-/** Bytes [from, to) of the stored title: "the first `to` bytes, minus the first `from` bytes". */
-const slice = (from, to) => `(('%.${to}s' * #preserved_text) - ('%.${from}s' * #preserved_text))`;
+
 /**
- * Strip the padding from an icon field. Whether `-` removes one match or all of them is not documented, so remove
- * runs of 32, 16, 8, 4, 2 and 1 pad characters in turn: that clears any padding length under either reading.
+ * Hidden helper that remembers the last title containing `key` (the documented "preserve title text" pattern).
+ * It becomes visible for one frame when such a title arrives, and that visibility change copies the title.
  */
-const trimmed = (expr) => [32, 16, 8, 4, 2, 1].reduce((acc, n) => `(${acc} - '${PAD.repeat(n)}')`, expr);
-
-/** Hidden helper that remembers the last HUD title; one per visible element, as in the documented pattern. */
-const dataControl = {
-  type: 'panel',
-  size: [0, 0],
-  property_bag: { '#preserved_text': emptyPayload() },
-  bindings: [
-    { binding_name: '#hud_title_text_string' },
-    { binding_name: '#hud_title_text_string', binding_name_override: '#preserved_text', binding_condition: 'visibility_changed' },
-    {
-      binding_type: 'view',
-      source_property_name: `(not (#hud_title_text_string = #preserved_text) and not ((#hud_title_text_string - '${PREFIX}') = #hud_title_text_string))`,
-      target_property_name: '#visible',
-    },
-  ],
-};
-
+const remember = (key, initial) => ({
+  data_control: {
+    type: 'panel',
+    size: [0, 0],
+    property_bag: { '#preserved_text': initial },
+    bindings: [
+      { binding_name: '#hud_title_text_string' },
+      { binding_name: '#hud_title_text_string', binding_name_override: '#preserved_text', binding_condition: 'visibility_changed' },
+      {
+        binding_type: 'view',
+        source_property_name: `(not (#hud_title_text_string = #preserved_text) and not ((#hud_title_text_string - '${key}') = #hud_title_text_string))`,
+        target_property_name: '#visible',
+      },
+    ],
+  },
+});
 const fromData = (expression, target) => ({ binding_type: 'view', source_control_name: 'data_control', source_property_name: expression, target_property_name: target });
-const withData = { controls: [{ 'data_control@hud.bhud_data': {} }] };
+
+/** Bytes [from, to) of the remembered text message: "the first `to` bytes, minus the first `from` bytes". */
+const slice = (from, to) => `(('%.${to}s' * #preserved_text) - ('%.${from}s' * #preserved_text))`;
 
 function row(slot, index) {
-  const start = byteLength(PREFIX) + index * SLOT_W;
-  const iconField = slice(start, start + ICON_W);
-  const textField = slice(start + ICON_W, start + SLOT_W);
-  // Icons sit on the outside, numbers next to the hotbar... on the left that means icon first, then the number box.
+  const start = byteLength(TEXT_KEY) + index * TEXT_W;
+  // Icons sit on the outside and numbers next to the hotbar: icon then number on the left, number then icon on the right.
   const iconSide = slot.side === 'left' ? 'left_middle' : 'right_middle';
-  const textOffset = slot.side === 'left' ? [ICON + GAP, 0] : [0, 0];
+  const icon = { type: 'image', size: [ICON, ICON], layer: 2, anchor_from: iconSide, anchor_to: iconSide };
+  if (slot.icon) {
+    icon.texture = `textures/${slot.icon}`;
+  } else {
+    // The icon message is the key followed by the texture path, so removing the key leaves the path.
+    Object.assign(icon, {
+      texture: '#texture',
+      controls: [remember(iconKey(index), initialIcon(index))],
+      bindings: [fromData(`('textures/' + (#preserved_text - '${iconKey(index)}'))`, '#texture')],
+    });
+  }
   return {
     [`bhud_${slot.key}`]: {
       type: 'panel',
@@ -68,18 +75,7 @@ function row(slot, index) {
       anchor_to: 'top_left',
       offset: [0, slot.row * ROW_H],
       controls: [
-        {
-          icon: {
-            type: 'image',
-            texture: '#texture',
-            size: [ICON, ICON],
-            layer: 2,
-            anchor_from: iconSide,
-            anchor_to: iconSide,
-            ...withData,
-            bindings: [fromData(`('textures/' + ${trimmed(iconField)})`, '#texture')],
-          },
-        },
+        { icon },
         {
           value: {
             type: 'label',
@@ -88,13 +84,13 @@ function row(slot, index) {
             layer: 2,
             anchor_from: 'left_middle',
             anchor_to: 'left_middle',
-            offset: textOffset,
+            offset: slot.side === 'left' ? [ICON + GAP, 0] : [0, 0],
             text_alignment: 'right',
             shadow: true,
             localize: false,
             enable_profanity_filter: false,
-            ...withData,
-            bindings: [fromData(textField, '#text')],
+            controls: [remember(TEXT_KEY, initialText())],
+            bindings: [fromData(slice(start, start + TEXT_W), '#text')],
           },
         },
       ],
@@ -114,15 +110,14 @@ const column = (side) => ({
 const hudScreen = {
   namespace: 'hud',
 
-  bhud_data: dataControl,
   bhud_left: column('left'),
   bhud_right: column('right'),
 
-  // The HUD data travels as a title; keep that title itself off the screen. Ordinary titles are unaffected.
+  // The HUD data travels as titles; keep those off the screen. Ordinary titles are unaffected.
   hud_title_text: {
     bindings: [
       { binding_name: '#hud_title_text_string' },
-      { binding_type: 'view', source_property_name: `((#hud_title_text_string - '${PREFIX}') = #hud_title_text_string)`, target_property_name: '#visible' },
+      { binding_type: 'view', source_property_name: `((#hud_title_text_string - '${MARKER}') = #hud_title_text_string)`, target_property_name: '#visible' },
     ],
   },
 

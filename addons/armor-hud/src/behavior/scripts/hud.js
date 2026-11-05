@@ -1,6 +1,6 @@
 // Turns what a player is wearing and carrying into the HUD payload. No Minecraft imports here, so it can be tested
 // outside the game (see ../../../test.mjs).
-import { EMPTY_ICON, ICON_W, PAD, PREFIX, SLOTS, TEXT_CHARS } from './layout.js';
+import { EMPTY_ICON, SLOTS, TEXT_CHARS, TEXT_KEY, iconKey } from './layout.js';
 import { BLOCK_TEXTURES, ITEM_TEXTURES } from './textures.js';
 
 /** Item ids whose sprite file is not simply the id (or the id with golden_/wooden_ shortened). */
@@ -28,7 +28,6 @@ const SPRITE_ALIASES = {
 
 /** Used when an item has no texture we can name (most blocks with several faces, items from other add-ons). */
 const UNKNOWN_ICON = 'ui/inventory_icon';
-const FREE_SLOTS_ICON = 'items/bundle';
 const ARROW_ICON = 'items/arrow';
 
 /** Texture path below `textures/` for an item id such as `minecraft:diamond_sword`. */
@@ -72,7 +71,7 @@ function describeItem(item, counts) {
  *   counts: Map<string, number>,   // every item id the player carries -> total amount
  *   freeSlots: number,
  * }}
- * @returns {Record<string, null | { icon: string, text: string, color: string }>} one entry per slot key
+ * @returns {Record<string, null | { icon?: string, text: string, color: string }>} one entry per slot key
  */
 export function describe(state) {
   const { counts } = state;
@@ -86,26 +85,42 @@ export function describe(state) {
     legs: describeItem(state.legs, counts),
     feet: describeItem(state.feet, counts),
     arrows: arrows > 0 || hasLauncher ? { icon: ARROW_ICON, text: String(arrows), color: arrows === 0 ? 'c' : arrows < 16 ? 'e' : 'f' } : null,
-    free: { icon: FREE_SLOTS_ICON, text: String(state.freeSlots), color: state.freeSlots === 0 ? 'c' : state.freeSlots <= 3 ? 'e' : 'f' },
+    free: { text: String(state.freeSlots), color: state.freeSlots === 0 ? 'c' : state.freeSlots <= 3 ? 'e' : 'f' },
   };
 }
 
-/** One slot on the wire: plain ASCII apart from the colour code, so byte positions are predictable. */
-function encodeSlot(entry) {
-  let icon = entry?.icon ?? EMPTY_ICON;
-  if (icon.length > ICON_W || !/^[\x21-\x7d]+$/.test(icon)) icon = UNKNOWN_ICON;
+/** The longest texture path we will send; anything else falls back to the generic icon. */
+const MAX_ICON_LENGTH = 64;
+
+function iconPath(entry) {
+  const icon = entry?.icon ?? EMPTY_ICON;
+  return icon.length <= MAX_ICON_LENGTH && /^[a-z0-9_/]+$/.test(icon) ? icon : UNKNOWN_ICON;
+}
+
+/** One number on the wire: plain ASCII after the colour code, so byte positions are predictable. */
+function textField(entry) {
   const text = (entry?.text ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, TEXT_CHARS);
   // Right-aligned on both sides of the hotbar, so the numbers line up under each other.
-  return icon.padEnd(ICON_W, PAD) + '§' + (entry?.color ?? 'f') + text.padStart(TEXT_CHARS);
+  return '\u00a7' + (entry?.color ?? 'f') + text.padStart(TEXT_CHARS);
 }
 
-/** The title text to send for this player. */
-export function buildPayload(state) {
+/**
+ * The titles that put this player's HUD in the right state, one per channel: index 0 is the text message, then one
+ * icon message per slot that has a changing icon. Sending a message again is harmless.
+ */
+export function buildMessages(state) {
   const entries = describe(state);
-  return PREFIX + SLOTS.map((slot) => encodeSlot(entries[slot.key])).join('');
+  const messages = [TEXT_KEY + SLOTS.map((slot) => textField(entries[slot.key])).join('')];
+  SLOTS.forEach((slot, index) => {
+    if (!slot.icon) messages.push(iconKey(index) + iconPath(entries[slot.key]));
+  });
+  return messages;
 }
 
-/** What the HUD shows before the first update arrives. */
-export function emptyPayload() {
-  return PREFIX + SLOTS.map(() => encodeSlot(null)).join('');
+/** What the HUD holds before the first messages arrive: no numbers, transparent icons. */
+export function initialText() {
+  return TEXT_KEY + SLOTS.map(() => textField(null)).join('');
+}
+export function initialIcon(index) {
+  return iconKey(index) + EMPTY_ICON;
 }
