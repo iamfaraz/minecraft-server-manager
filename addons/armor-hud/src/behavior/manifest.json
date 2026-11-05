@@ -4,7 +4,7 @@
     "name": "Blockhost Armor HUD",
     "description": "Shows held items, armour durability, arrows and free inventory slots around the hotbar. Needs the Blockhost Armor HUD Resources pack.",
     "uuid": "7f65c553-b4b9-4229-b936-0bcc3ba269f2",
-    "version": [1, 1, 0],
+    "version": [1, 2, 0],
     "min_engine_version": [1, 21, 90]
   },
   "modules": [
@@ -12,12 +12,12 @@
       "type": "script",
       "language": "javascript",
       "uuid": "8d928df8-bf69-4017-826a-b7cfe97642fa",
-      "version": [1, 1, 0],
+      "version": [1, 2, 0],
       "entry": "scripts/main.js"
     }
   ],
   "dependencies": [
     { "module_name": "@minecraft/server", "version": "2.0.0" },
-    { "uuid": "971022ad-4921-4b6d-831a-2009e507febc", "version": [1, 1, 0] }
+    { "uuid": "971022ad-4921-4b6d-831a-2009e507febc", "version": [1, 2, 0] }
   ]
 }

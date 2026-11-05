@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 // Checks the parts of the add-on that can be checked outside the game:
-//   1. the script turns player states into the expected slots, and
-//   2. the generated HUD, fed the script's titles one at a time, ends up showing the right icon and number per slot.
-// The expressions are evaluated by a small interpreter of the JSON UI operators, under both possible readings of
-// string subtraction (remove the first match / remove every match), with `%.Ns` counting bytes as documented.
+//   1. the script turns player states into the expected slots,
+//   2. the generated HUD, fed the script's titles, ends up showing the right icon and number per slot, and
+//   3. the HUD keeps to the rules learned on a real device (see the notes at the top of build.mjs).
+// The HUD's expressions are evaluated by a small interpreter of the JSON UI operators, under both possible readings
+// of string subtraction (remove the first match / remove every match), with `%.Ns` counting bytes as documented.
 //   node addons/armor-hud/build.mjs && node addons/armor-hud/test.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildMessages, describe, durabilityPercent, iconFor, initialText } from './src/behavior/scripts/hud.js';
-import { MARKER, SLOTS, TEXT_KEY, TEXT_W } from './src/behavior/scripts/layout.js';
+import { buildPayload, describe, durabilityPercent, iconFor } from './src/behavior/scripts/hud.js';
+import { PREFIX, SLOTS, SLOT_W } from './src/behavior/scripts/layout.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hud = JSON.parse(fs.readFileSync(path.join(here, 'build', 'BlockhostArmorHUD_RP', 'ui', 'hud_screen.json'), 'utf8'));
@@ -73,34 +74,43 @@ function evaluate(source, vars, removeAll) {
 }
 
 /**
- * A stand-in for the HUD: every element with a data_control keeps its own remembered title, exactly as the pack's
- * bindings describe. `receive` plays one title; `shown` evaluates what each slot displays.
+ * A stand-in for the HUD, following the pack's bindings: one helper remembers the last HUD title, and every element
+ * computes its properties from it. `receive` plays one title; `shown` evaluates what each slot displays.
  */
 function createHud(removeAll) {
-  const elements = [];
-  for (const side of ['bhud_left', 'bhud_right']) {
-    for (const control of hud[side].controls) {
-      const [name, rowDef] = Object.entries(control)[0];
-      const slot = name.replace('bhud_', '');
-      for (const [part, target] of [[rowDef.controls[0].icon, 'texture'], [rowDef.controls[1].value, 'text']]) {
-        const data = part.controls?.[0].data_control;
-        elements.push({ slot, target, part, data, preserved: data?.property_bag['#preserved_text'] });
-      }
+  const root = hud.bhud_root.controls.map((c) => Object.entries(c)[0]);
+  const [, helper] = root.find(([name]) => name === 'bhud_data');
+  let preserved = helper.property_bag['#preserved_text'];
+  const properties = (control) => {
+    // Bindings run in order; a later one may use a property an earlier one set.
+    const own = {};
+    for (const b of control.bindings ?? []) {
+      const vars = b.source_control_name ? { '#preserved_text': preserved } : own;
+      if (b.source_control_name) assert.equal(b.source_control_name, 'bhud_data');
+      own[b.target_property_name] = evaluate(b.source_property_name, vars, removeAll);
     }
-  }
+    return own;
+  };
   return {
     receive(title) {
-      for (const el of elements) {
-        if (!el.data) continue;
-        const becomesVisible = evaluate(el.data.bindings[2].source_property_name, { '#hud_title_text_string': title, '#preserved_text': el.preserved }, removeAll);
-        if (becomesVisible) el.preserved = title; // the visibility change copies the title
-      }
+      const flicker = evaluate(helper.bindings[2].source_property_name, { '#hud_title_text_string': title, '#preserved_text': preserved }, removeAll);
+      if (flicker) preserved = title; // the visibility change copies the title
     },
     shown() {
       const out = {};
-      for (const el of elements) {
-        out[el.slot] ??= {};
-        out[el.slot][el.target] = el.data ? evaluate(el.part.bindings[0].source_property_name, { '#preserved_text': el.preserved }, removeAll) : el.part.texture;
+      for (const [name, columnDef] of root) {
+        if (name === 'bhud_data') continue;
+        const visible = properties(columnDef)['#visible'];
+        for (const control of columnDef.controls) {
+          const [rowName, rowDef] = Object.entries(control)[0];
+          const icon = rowDef.controls[0].icon;
+          const value = rowDef.controls[1].value;
+          out[rowName.replace('bhud_', '')] = {
+            visible,
+            texture: icon.bindings ? properties(icon)['#texture'] : icon.texture,
+            text: properties(value)['#text'],
+          };
+        }
       }
       return out;
     },
@@ -150,38 +160,57 @@ assert.equal(describe(naked).arrows, null);
 
 /* ---- wire format and HUD ---- */
 assert.deepEqual(entries.free, { text: '6', color: 'f' });
+const expectedBytes = Buffer.byteLength(PREFIX) + SLOTS.length * SLOT_W;
 const states = { reference, naked, builder };
 for (const removeAll of [false, true]) {
   // One HUD lives through all three states in turn, like a player changing gear.
   const screen = createHud(removeAll);
-  for (const slot of SLOTS) assert.equal(screen.shown()[slot.key].texture, `textures/${slot.icon ?? 'bhud/empty'}`, 'before any message: no broken textures');
+  for (const slot of SLOTS) assert.equal(screen.shown()[slot.key].visible, false, 'nothing is drawn before the first title');
   for (const [label, state] of Object.entries(states)) {
-    const messages = buildMessages(state);
-    assert.equal(messages.length, 1 + SLOTS.filter((s) => !s.icon).length);
-    assert.equal(Buffer.byteLength(messages[0], 'utf8'), Buffer.byteLength(TEXT_KEY) + SLOTS.length * TEXT_W, `${label}: text message must be fixed-width`);
-    for (const message of messages) {
-      assert.ok(message.includes(MARKER));
-      assert.ok(/^[\x20-\x7e\u00a7]+$/.test(message), 'printable ASCII plus the colour sign only');
-      screen.receive(message);
-      screen.receive('Welcome to the server!'); // ordinary titles in between must not disturb anything
-    }
+    const payload = buildPayload(state);
+    assert.equal(Buffer.byteLength(payload, 'utf8'), expectedBytes, `${label}: payload must be fixed-width`);
+    assert.ok(/^[\x20-\x7e\u00a7]+$/.test(payload), 'printable ASCII plus the colour sign only');
+    screen.receive(payload);
+    screen.receive('Welcome to the server!'); // an ordinary title must not disturb anything
+    screen.receive('');
     const want = describe(state);
     const shown = screen.shown();
     for (const slot of SLOTS) {
       const entry = want[slot.key];
+      assert.equal(shown[slot.key].visible, true);
       assert.equal(shown[slot.key].texture, `textures/${slot.icon ?? entry?.icon ?? 'bhud/empty'}`, `${label}/${slot.key} texture (removeAll=${removeAll})`);
       assert.equal(shown[slot.key].text, `\u00a7${entry ? entry.color : 'f'}${(entry ? entry.text : '').padStart(5)}`, `${label}/${slot.key} text (removeAll=${removeAll})`);
     }
   }
 }
-assert.equal(buildMessages(reference)[1], 'bhud2i0:items/diamond_sword');
-assert.equal(buildMessages({ ...naked, freeSlots: 0 })[0].length, initialText().length);
 
-// HUD messages are hidden from the normal title display; ordinary titles are not.
+// HUD titles are hidden from the normal title display; ordinary titles are not.
 const titleVisible = hud.hud_title_text.bindings[1].source_property_name;
 for (const removeAll of [false, true]) {
-  for (const message of buildMessages(reference)) assert.equal(evaluate(titleVisible, { '#hud_title_text_string': message }, removeAll), false);
+  assert.equal(evaluate(titleVisible, { '#hud_title_text_string': buildPayload(reference) }, removeAll), false);
   assert.equal(evaluate(titleVisible, { '#hud_title_text_string': 'Welcome!' }, removeAll), true);
 }
 
-console.log(`ok: ${SLOTS.length} slots, ${buildMessages(reference).length} message channels, HUD simulation verified under both subtraction semantics`);
+/* ---- rules learned on a real device ---- */
+const names = new Map(); // control name -> how many controls carry it
+const sources = [];
+(function walk(node) {
+  if (Array.isArray(node)) return node.forEach(walk);
+  if (!node || typeof node !== 'object') return;
+  for (const b of node.bindings ?? []) {
+    if (b.source_control_name) sources.push(b);
+    // A texture path built straight from another control's data stays on the missing-texture pattern.
+    if (b.target_property_name === '#texture') assert.equal(b.source_control_name, undefined, '#texture must be computed from the image\'s own property');
+  }
+  for (const control of node.controls ?? []) {
+    const name = Object.keys(control)[0].split('@')[0];
+    names.set(name, (names.get(name) ?? 0) + 1);
+    walk(control[Object.keys(control)[0]]);
+  }
+  for (const [key, value] of Object.entries(node)) if (key !== 'controls' && key !== 'bindings') walk(value);
+})(hud);
+assert.ok(sources.length > 0);
+// `source_control_name` resolves to the first control with that name anywhere on the HUD, so it must be unambiguous.
+for (const b of sources) assert.equal(names.get(b.source_control_name), 1, `control name "${b.source_control_name}" must be unique`);
+
+console.log(`ok: ${SLOTS.length} slots, ${expectedBytes}-byte payload, HUD simulation and device rules verified`);

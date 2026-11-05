@@ -1,6 +1,6 @@
 // Turns what a player is wearing and carrying into the HUD payload. No Minecraft imports here, so it can be tested
 // outside the game (see ../../../test.mjs).
-import { EMPTY_ICON, SLOTS, TEXT_CHARS, TEXT_KEY, iconKey } from './layout.js';
+import { EMPTY_ICON, ICON_W, PAD, PREFIX, SLOTS, TEXT_CHARS } from './layout.js';
 import { BLOCK_TEXTURES, ITEM_TEXTURES } from './textures.js';
 
 /** Item ids whose sprite file is not simply the id (or the id with golden_/wooden_ shortened). */
@@ -89,38 +89,21 @@ export function describe(state) {
   };
 }
 
-/** The longest texture path we will send; anything else falls back to the generic icon. */
-const MAX_ICON_LENGTH = 64;
-
-function iconPath(entry) {
+/** Icon field: the texture path, padded to a fixed width. Letters, digits, _ and / only, so the pad character never appears in one. */
+function iconField(entry) {
   const icon = entry?.icon ?? EMPTY_ICON;
-  return icon.length <= MAX_ICON_LENGTH && /^[a-z0-9_/]+$/.test(icon) ? icon : UNKNOWN_ICON;
+  return (icon.length <= ICON_W && /^[A-Za-z0-9_/]+$/.test(icon) ? icon : UNKNOWN_ICON).padEnd(ICON_W, PAD);
 }
 
-/** One number on the wire: plain ASCII after the colour code, so byte positions are predictable. */
+/** Text field: plain ASCII after the colour code, so byte positions are predictable. */
 function textField(entry) {
   const text = (entry?.text ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, TEXT_CHARS);
   // Right-aligned on both sides of the hotbar, so the numbers line up under each other.
   return '\u00a7' + (entry?.color ?? 'f') + text.padStart(TEXT_CHARS);
 }
 
-/**
- * The titles that put this player's HUD in the right state, one per channel: index 0 is the text message, then one
- * icon message per slot that has a changing icon. Sending a message again is harmless.
- */
-export function buildMessages(state) {
+/** The title text that puts this player's HUD in the right state. Sending it again is harmless. */
+export function buildPayload(state) {
   const entries = describe(state);
-  const messages = [TEXT_KEY + SLOTS.map((slot) => textField(entries[slot.key])).join('')];
-  SLOTS.forEach((slot, index) => {
-    if (!slot.icon) messages.push(iconKey(index) + iconPath(entries[slot.key]));
-  });
-  return messages;
-}
-
-/** What the HUD holds before the first messages arrive: no numbers, transparent icons. */
-export function initialText() {
-  return TEXT_KEY + SLOTS.map(() => textField(null)).join('');
-}
-export function initialIcon(index) {
-  return iconKey(index) + EMPTY_ICON;
+  return PREFIX + SLOTS.map((slot) => iconField(entries[slot.key]) + textField(entries[slot.key])).join('');
 }

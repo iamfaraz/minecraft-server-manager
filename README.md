@@ -138,7 +138,13 @@ Durability is a percentage coloured from green down to red. Empty slots show not
 
 **Install:** open the Bedrock server in Blockhost, go to **Add-ons**, upload the `.mcaddon` file and restart the server. It contains a behavior pack and a resource pack; both are enabled for the world. Players download the resource pack when they join, so set `texturepack-required=true` under Settings if you want everyone to have it. Works for every Bedrock client, consoles included.
 
-**How it works:** a server-side script (Script API 2.0, Bedrock 1.21.90 or newer) reads each player's equipment several times a second and sends changes to that player as hidden titles: one carrying all the numbers, and one per icon that changed. The resource pack keeps those titles off the screen and draws their contents next to the hotbar, using the item textures already in the player's game. Everything is sent again every 30 seconds so a HUD that missed a message corrects itself. Ordinary titles still show, although a HUD update that arrives while one is on screen replaces it.
+**How it works:** a server-side script (Script API 2.0, Bedrock 1.21.90 or newer) reads each player's equipment ten times a second and, when something changed, sends that player one hidden title holding every icon and number. The resource pack keeps that title off the screen and draws its contents next to the hotbar, using the item textures already in the player's game. The data is repeated a few times after a spawn and then every 30 seconds, so a HUD that missed an update corrects itself.
+
+**Good to know**
+
+- The HUD travels over the title channel, so an ordinary title (from `/title` or another add-on) disappears early if the HUD updates while it is showing.
+- Blocks with several different faces and items from other add-ons show a generic icon; shields show the slot outline. Leather armour is drawn undyed.
+- On touch screens the right column sits just past the hotbar's "..." button.
 
 **Updating the add-on:** upload the new `.mcaddon` over the old one and restart. Each release has a higher pack version, which is what makes players' devices download the new resource pack instead of using their cached copy.
 

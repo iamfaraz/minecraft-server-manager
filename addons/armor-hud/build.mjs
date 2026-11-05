@@ -2,12 +2,19 @@
 // Builds blockhost-armor-hud.mcaddon: the behavior pack (script) plus the resource pack (HUD layout).
 // The HUD layout is generated here from the same constants the script uses, so the two cannot drift apart.
 //   node addons/armor-hud/build.mjs
+//
+// The JSON UI techniques below were each confirmed on a real device (Android, Bedrock 1.26.62). Things that look
+// like they should work but do not, so that nobody "simplifies" them back in:
+//   - `source_control_name` finds the first control with that name anywhere on the HUD, not the element's own
+//     child. Helpers therefore need a unique name; one shared helper serves every element.
+//   - A property_bag default is not seen by other controls, so the helper holds nothing until the first title.
+//   - Building the texture path from a long expression in a single binding leaves the image on the missing-texture
+//     pattern. Cutting out the name and prefixing `textures/` must be two bindings.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MARKER, SLOTS, TEXT_KEY, TEXT_W, iconKey } from './src/behavior/scripts/layout.js';
-import { initialIcon, initialText } from './src/behavior/scripts/hud.js';
+import { ICON_W, PAD, PREFIX, SLOTS, SLOT_W } from './src/behavior/scripts/layout.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'blockhost-armor-hud.mcaddon');
@@ -24,48 +31,49 @@ const FROM_CENTRE = 106;
 /** Lifts the columns so the bottom row is level with the hotbar. */
 const BOTTOM = -2;
 
-/* ---- how the HUD reads the hidden titles ---- */
+/* ---- how the HUD reads the hidden title ---- */
+const DATA = 'bhud_data';
 const byteLength = (s) => Buffer.byteLength(s, 'utf8');
 
 /**
- * Hidden helper that remembers the last title containing `key` (the documented "preserve title text" pattern).
- * It becomes visible for one frame when such a title arrives, and that visibility change copies the title.
+ * The one helper that remembers the last HUD title (the "preserve title text" pattern): it turns visible for a
+ * moment when a new title containing PREFIX arrives, and that visibility change copies the title into
+ * #preserved_text. Titles without the prefix are ignored, so ordinary titles do not disturb the HUD.
  */
-const remember = (key, initial) => ({
-  data_control: {
-    type: 'panel',
-    size: [0, 0],
-    property_bag: { '#preserved_text': initial },
-    bindings: [
-      { binding_name: '#hud_title_text_string' },
-      { binding_name: '#hud_title_text_string', binding_name_override: '#preserved_text', binding_condition: 'visibility_changed' },
-      {
-        binding_type: 'view',
-        source_property_name: `(not (#hud_title_text_string = #preserved_text) and not ((#hud_title_text_string - '${key}') = #hud_title_text_string))`,
-        target_property_name: '#visible',
-      },
-    ],
-  },
-});
-const fromData = (expression, target) => ({ binding_type: 'view', source_control_name: 'data_control', source_property_name: expression, target_property_name: target });
+const dataControl = {
+  type: 'panel',
+  size: [0, 0],
+  property_bag: { '#preserved_text': '' },
+  bindings: [
+    { binding_name: '#hud_title_text_string' },
+    { binding_name: '#hud_title_text_string', binding_name_override: '#preserved_text', binding_condition: 'visibility_changed' },
+    {
+      binding_type: 'view',
+      source_property_name: `((not (#hud_title_text_string = #preserved_text)) and (not ((#hud_title_text_string - '${PREFIX}') = #hud_title_text_string)))`,
+      target_property_name: '#visible',
+    },
+  ],
+};
+const fromData = (expression, target) => ({ binding_type: 'view', source_control_name: DATA, source_property_name: expression, target_property_name: target });
 
-/** Bytes [from, to) of the remembered text message: "the first `to` bytes, minus the first `from` bytes". */
+/** Bytes [from, to) of the remembered title: "the first `to` bytes, minus the first `from` bytes". */
 const slice = (from, to) => `(('%.${to}s' * #preserved_text) - ('%.${from}s' * #preserved_text))`;
+/** Strip the padding from an icon field by removing runs of 32, 16, 8, 4, 2 and 1 pad characters in turn. */
+const trimmed = (expr) => [32, 16, 8, 4, 2, 1].reduce((acc, n) => `(${acc} - '${PAD.repeat(n)}')`, expr);
 
 function row(slot, index) {
-  const start = byteLength(TEXT_KEY) + index * TEXT_W;
+  const start = byteLength(PREFIX) + index * SLOT_W;
   // Icons sit on the outside and numbers next to the hotbar: icon then number on the left, number then icon on the right.
   const iconSide = slot.side === 'left' ? 'left_middle' : 'right_middle';
   const icon = { type: 'image', size: [ICON, ICON], layer: 2, anchor_from: iconSide, anchor_to: iconSide };
   if (slot.icon) {
     icon.texture = `textures/${slot.icon}`;
   } else {
-    // The icon message is the key followed by the texture path, so removing the key leaves the path.
-    Object.assign(icon, {
-      texture: '#texture',
-      controls: [remember(iconKey(index), initialIcon(index))],
-      bindings: [fromData(`('textures/' + (#preserved_text - '${iconKey(index)}'))`, '#texture')],
-    });
+    icon.texture = '#texture';
+    icon.bindings = [
+      fromData(trimmed(slice(start, start + ICON_W)), '#icon'),
+      { binding_type: 'view', source_property_name: "('textures/' + #icon)", target_property_name: '#texture' },
+    ];
   }
   return {
     [`bhud_${slot.key}`]: {
@@ -89,8 +97,7 @@ function row(slot, index) {
             shadow: true,
             localize: false,
             enable_profanity_filter: false,
-            controls: [remember(TEXT_KEY, initialText())],
-            bindings: [fromData(slice(start, start + TEXT_W), '#text')],
+            bindings: [fromData(slice(start + ICON_W, start + SLOT_W), '#text')],
           },
         },
       ],
@@ -104,31 +111,30 @@ const column = (side) => ({
   anchor_from: 'bottom_middle',
   anchor_to: side === 'left' ? 'bottom_right' : 'bottom_left',
   offset: [side === 'left' ? -FROM_CENTRE : FROM_CENTRE, BOTTOM],
+  // Nothing is drawn until the first title has arrived; without this the icons would start out as missing textures.
+  bindings: [fromData("(not (#preserved_text = ''))", '#visible')],
   controls: SLOTS.map((slot, index) => (slot.side === side ? row(slot, index) : null)).filter(Boolean),
 });
 
 const hudScreen = {
   namespace: 'hud',
 
-  bhud_left: column('left'),
-  bhud_right: column('right'),
+  bhud_root: {
+    type: 'panel',
+    size: ['100%', '100%'],
+    controls: [{ [DATA]: dataControl }, { bhud_left: column('left') }, { bhud_right: column('right') }],
+  },
 
-  // The HUD data travels as titles; keep those off the screen. Ordinary titles are unaffected.
+  // The HUD data travels as a title; keep that title itself off the screen. Ordinary titles are unaffected.
   hud_title_text: {
     bindings: [
       { binding_name: '#hud_title_text_string' },
-      { binding_type: 'view', source_property_name: `((#hud_title_text_string - '${MARKER}') = #hud_title_text_string)`, target_property_name: '#visible' },
+      { binding_type: 'view', source_property_name: `((#hud_title_text_string - '${PREFIX}') = #hud_title_text_string)`, target_property_name: '#visible' },
     ],
   },
 
   root_panel: {
-    modifications: [
-      {
-        array_name: 'controls',
-        operation: 'insert_front',
-        value: [{ 'bhud_left@hud.bhud_left': {} }, { 'bhud_right@hud.bhud_right': {} }],
-      },
-    ],
+    modifications: [{ array_name: 'controls', operation: 'insert_front', value: [{ 'bhud_root@hud.bhud_root': {} }] }],
   },
 };
 

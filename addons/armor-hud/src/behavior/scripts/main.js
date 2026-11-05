@@ -2,19 +2,22 @@
 // around the hotbar. This script reads the data on the server and sends it to the player's HUD as a hidden title;
 // the companion resource pack draws it.
 import { EquipmentSlot, system, world } from '@minecraft/server';
-import { buildMessages } from './hud.js';
+import { buildPayload } from './hud.js';
 
+/** How often each player is checked, in game ticks (20 per second). */
+const CHECK_EVERY = 2;
 /**
- * How often each player is looked at, in game ticks (20 per second). At most one message goes out per player per
- * pass: titles replace each other, so two sent together could reach the HUD as one.
+ * Unchanged data is sent again after these delays (ticks since the previous send), then at the last one forever.
+ * A title that arrives in the same instant as another one can be missed by the HUD, and a HUD that is still loading
+ * misses everything, so: several early repeats after a spawn, one after an ordinary change, then a slow heartbeat.
+ * Repeats are kept sparse because every send replaces whatever ordinary title is on screen.
  */
-const PASS_EVERY = 3;
-/** Everything is sent again this often, so a HUD that was rebuilt or missed a message fills back in. */
-const RESYNC_EVERY = 600;
-/** How long each hidden title stays up: long enough to be seen on a slow frame, shorter than a pass. */
-const TITLE_TICKS = 2;
+const RESEND_AFTER_SPAWN = [40, 60, 100, 600];
+const RESEND_AFTER_CHANGE = [60, 600];
+/** How long the hidden title stays up. */
+const TITLE_TICKS = 5;
 
-/** player id -> { messages: what the HUD is believed to hold, per channel; syncedAt: tick of the last full resync } */
+/** player id -> { payload, tick, repeats, delays }: what was last sent, when, how often unchanged, on which schedule */
 const sent = new Map();
 
 function itemInfo(item) {
@@ -57,22 +60,23 @@ system.runInterval(() => {
     try {
       const state = readPlayer(player);
       if (!state) continue;
-      const want = buildMessages(state);
-      let record = sent.get(player.id);
-      if (!record || now - record.syncedAt >= RESYNC_EVERY) {
-        record = { messages: [], syncedAt: now };
-        sent.set(player.id, record);
+      const payload = buildPayload(state);
+      const last = sent.get(player.id);
+      if (last && last.payload === payload) {
+        if (now - last.tick < last.delays[Math.min(last.repeats, last.delays.length - 1)]) continue;
+        last.tick = now;
+        last.repeats++;
+      } else {
+        sent.set(player.id, { payload, tick: now, repeats: 0, delays: last ? RESEND_AFTER_CHANGE : RESEND_AFTER_SPAWN });
       }
-      const channel = want.findIndex((message, i) => record.messages[i] !== message);
-      if (channel === -1) continue;
-      player.onScreenDisplay.setTitle(want[channel], { fadeInDuration: 0, stayDuration: TITLE_TICKS, fadeOutDuration: 0 });
-      record.messages[channel] = want[channel];
+      player.onScreenDisplay.setTitle(payload, { fadeInDuration: 0, stayDuration: TITLE_TICKS, fadeOutDuration: 0 });
     } catch {
       // The player left or is changing dimension this tick; try again on the next pass.
     }
   }
-}, PASS_EVERY);
+}, CHECK_EVERY);
 
-// A fresh spawn gets a fresh HUD, so forget what was sent and let the next passes fill it in.
+// A fresh spawn or a new dimension can mean a fresh HUD, so start the send schedule over.
 world.afterEvents.playerSpawn.subscribe((event) => sent.delete(event.player.id));
+world.afterEvents.playerDimensionChange.subscribe((event) => sent.delete(event.player.id));
 world.afterEvents.playerLeave.subscribe((event) => sent.delete(event.playerId));
