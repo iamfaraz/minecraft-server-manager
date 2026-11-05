@@ -61,7 +61,9 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo amd64) \
 # MCXboxBroadcast (GPL-3.0, run as a separate process) lets console players join via the Xbox Live Friends tab
 ARG MCXB_VERSION=162
 RUN mkdir -p /opt/mcxboxbroadcast \
-    && ( curl -fsSL -o /opt/mcxboxbroadcast/MCXboxBroadcastStandalone.jar "https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar" ) \
+    && ( curl -fsSL -o /opt/mcxboxbroadcast/MCXboxBroadcastStandalone.jar "https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar" \
+         && curl -fsSL -o /opt/mcxboxbroadcast/LICENSE "https://raw.githubusercontent.com/MCXboxBroadcast/Broadcaster/${MCXB_VERSION}/LICENSE" \
+         && printf 'MCXboxBroadcast Standalone build %s (unmodified)\nSource: https://github.com/MCXboxBroadcast/Broadcaster/tree/%s\nLicense: GPL-3.0, see LICENSE\n' "${MCXB_VERSION}" "${MCXB_VERSION}" > /opt/mcxboxbroadcast/NOTICE ) \
     || echo "WARNING: MCXboxBroadcast download failed; it will be fetched at runtime when enabled"
 
 WORKDIR /app

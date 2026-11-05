@@ -11,7 +11,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **Update in place or branch off.** Change a server's version/flavor while keeping its world, configs, plugins and mods (a world backup is taken first), or create a brand-new server on another version and import the world from an existing server or one of its backups.
 - **Safe hot backups.** Running servers are frozen through the proper console pipeline (`save-off`/`save-all flush` on Java, `save hold`/`save query` with byte-exact truncation on Bedrock) so backups are consistent without kicking anyone. Manual and scheduled, with retention.
 - **Live console** (stdin/stdout, no RCON needed), **telemetry** (CPU, memory, players, ping via Server List Ping / RakNet), **player management** (whitelist/allowlist, ops, bans, kicks; Mojang UUID lookup; offline-mode UUIDs), **addons** (Modrinth search + one-click install with dependencies for plugins/mods; `.mcpack`/`.mcaddon` install for Bedrock), **jailed file manager** with editor, and a **server.properties** editor.
-- **Cross-play:** one toggle installs Geyser + Floodgate on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers. Geyser is configured per server through its `GEYSER_*` environment overrides (port from the very first start, RakNet and NetherNet both enabled, advertised address for Docker bridge mode), its Bedrock side is health-checked, and the console broadcast toggle works for these servers too.
+- **Cross-play:** one toggle installs [Geyser](https://geysermc.org) + [Floodgate](https://github.com/GeyserMC/Floodgate) on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers. Geyser is configured per server through its `GEYSER_*` environment overrides (port from the very first start, RakNet and NetherNet both enabled, advertised address for Docker bridge mode), its Bedrock side is health-checked, and the console broadcast toggle works for these servers too.
 - **Remote play without port forwarding:** built-in [playit.gg](https://playit.gg) agent. Enable it, claim it once in your browser, then create a tunnel per server from the UI to get a public address.
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
@@ -157,3 +157,20 @@ data/     (created at runtime) servers/<id>/{server.json,root/,backups/}, runtim
 - Existing sessions are invalidated when the token format changes; just sign in again.
 - The file manager and addon installers are jailed to each server's directory (path normalisation + realpath checks). Uploads are capped at 2 GB.
 - Processes run as `PUID:PGID` (default 1000:1000), never as root after startup.
+
+## Credits and third-party software
+
+Blockhost orchestrates these projects; it does not include their source code and is not affiliated with or endorsed by them. Thank you to their authors and contributors.
+
+| Project | What Blockhost uses it for | How it is obtained | License |
+| --- | --- | --- | --- |
+| [Geyser](https://geysermc.org) ([GeyserMC/Geyser](https://github.com/GeyserMC/Geyser)) by the GeyserMC team | Lets Bedrock clients join Java servers (the *Cross-play* toggle), including its built-in NetherNet signaling | Latest build downloaded from `download.geysermc.org` into the server's `plugins/` or `mods/` when you enable the toggle. Not bundled. | MIT |
+| [Floodgate](https://github.com/GeyserMC/Floodgate) by the GeyserMC team | Lets Bedrock players join online-mode Java servers without a Java account | Downloaded alongside Geyser from `download.geysermc.org`. Not bundled. | MIT |
+| [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) by rtm516 and contributors | Advertises a server over Xbox Live so Switch, Xbox and PlayStation players can join from the Friends tab (the *Console players* toggle) | The unmodified `MCXboxBroadcastStandalone.jar` release (build 162) is included in the Docker image under `/opt/mcxboxbroadcast/` with its license, and run as a separate process. Source for that build: <https://github.com/MCXboxBroadcast/Broadcaster/tree/162>. | GPL-3.0 |
+
+Notes:
+
+- Geyser, Floodgate and MCXboxBroadcast keep their own licenses and copyrights. Blockhost only downloads, configures and supervises them; its own code is not derived from theirs.
+- MCXboxBroadcast is distributed under the GNU General Public License v3.0. You may obtain, modify and redistribute it under that license from the repository above. Its authors recommend using an alternate Microsoft account, because the tool emulates parts of a game client.
+- Blockhost also talks to services run by others: Mojang's version and download APIs, PaperMC, PurpurMC, FabricMC, Forge, NeoForge, Adoptium (Java runtimes), Modrinth (mods and plugins) and playit.gg (tunnels). Their terms apply to what you download through them.
+- Minecraft is a trademark of Mojang AB / Microsoft. This project is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft.
