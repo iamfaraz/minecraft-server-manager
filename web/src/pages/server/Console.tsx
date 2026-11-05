@@ -5,25 +5,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { commonPrefix, suggest, type Suggestion } from '../../lib/commands';
+import { createLineWriter } from '../../lib/consoleLines';
 import { api } from '../../lib/api';
 import type { ServerSummary, WsEvent } from '../../lib/types';
 import { useWsEvent, ws } from '../../lib/ws';
 import { useToast } from '../../components/Toast';
 
-function colorize(line: string): string {
-  if (line.startsWith('> ')) return `\x1b[38;5;114m${line}\x1b[0m`;
-  if (line.startsWith('[Blockhost]')) return `\x1b[38;5;75m${line}\x1b[0m`;
-  if (/\b(ERROR|SEVERE|FATAL|Exception|Caused by)\b/.test(line)) return `\x1b[38;5;203m${line}\x1b[0m`;
-  if (/\b(WARN|WARNING)\b/.test(line)) return `\x1b[38;5;221m${line}\x1b[0m`;
-  if (/joined the game|Player connected|logged in/.test(line)) return `\x1b[38;5;114m${line}\x1b[0m`;
-  if (/left the game|Player disconnected|lost connection/.test(line)) return `\x1b[38;5;245m${line}\x1b[0m`;
-  return line.replace(/^(\[[^\]]+\])/, '\x1b[38;5;245m$1\x1b[0m');
-}
-
 export function Console({ s }: { s: ServerSummary }) {
   const toast = useToast();
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
+  // Folds consecutive repeats of a log message into one line with a counter, e.g. "… [x6]".
+  const lines = useRef(createLineWriter());
   const [cmd, setCmd] = useState('');
   const hist = useRef<string[]>([]);
   const histIdx = useRef(-1);
@@ -46,6 +39,7 @@ export function Console({ s }: { s: ServerSummary }) {
     t.open(host.current);
     fit.fit();
     term.current = t;
+    lines.current.reset();
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -64,13 +58,15 @@ export function Console({ s }: { s: ServerSummary }) {
   }, [s.id]);
 
   useWsEvent((ev: WsEvent) => {
-    if (!term.current) return;
+    const t = term.current;
+    if (!t) return;
     if (ev.type === 'server.backlog' && ev.id === s.id) {
-      term.current.clear();
-      term.current.write(ev.lines.map(colorize).join('\r\n') + (ev.lines.length ? '\r\n' : ''));
-      term.current.scrollToBottom();
+      t.reset();
+      lines.current.reset();
+      t.write(lines.current.render(ev.lines, t.cols, t.rows));
+      t.scrollToBottom();
     } else if (ev.type === 'server.log' && ev.id === s.id) {
-      term.current.writeln(colorize(ev.line));
+      t.write(lines.current.render([ev.line], t.cols, t.rows));
     }
   });
 
@@ -181,7 +177,13 @@ export function Console({ s }: { s: ServerSummary }) {
         <span>
           Live console · <span className="font-mono">{s.id}</span>
         </span>
-        <button className="btn-ghost btn-sm" onClick={() => term.current?.clear()}>
+        <button
+          className="btn-ghost btn-sm"
+          onClick={() => {
+            term.current?.reset();
+            lines.current.reset();
+          }}
+        >
           <Eraser className="size-3.5" /> Clear
         </button>
       </div>
