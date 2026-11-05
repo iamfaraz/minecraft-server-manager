@@ -1,5 +1,6 @@
 import net from 'node:net';
 import dgram from 'node:dgram';
+import fsp from 'node:fs/promises';
 import type { PingResult } from './types.js';
 
 function writeVarInt(n: number): Buffer {
@@ -167,4 +168,25 @@ export function pingBedrock(host: string, port: number, timeoutMs = 3000): Promi
       }
     });
   });
+}
+
+/**
+ * How many TCP sockets still hold local port `port`, in any state. This includes the connections of a server that
+ * just stopped: each one it closed first lingers in TIME_WAIT for 60 seconds. Returns null where the kernel's
+ * socket table is not readable (anything but Linux).
+ */
+export async function lingeringTcpSockets(port: number): Promise<number | null> {
+  const suffix = `:${port.toString(16).toUpperCase().padStart(4, '0')}`;
+  let count = 0;
+  let readable = false;
+  for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    try {
+      const rows = (await fsp.readFile(file, 'utf8')).split('\n').slice(1);
+      readable = true;
+      for (const row of rows) if (row.trim().split(/\s+/)[1]?.endsWith(suffix)) count++;
+    } catch {
+      /* no /proc here */
+    }
+  }
+  return readable ? count : null;
 }

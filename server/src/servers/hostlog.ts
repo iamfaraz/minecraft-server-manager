@@ -50,8 +50,8 @@ export function hostPrefix(style: LogStyle, level: HostLevel, d = new Date()): s
 
 /** Failures and forced stops get the level a server would give them. */
 export function levelFor(message: string): HostLevel {
-  if (/\bfailed\b|too many crashes/i.test(message)) return 'ERROR';
-  if (/did not stop in time|force killing|skipped/i.test(message)) return 'WARN';
+  if (/\bfailed\b|too many crashes|not retrying/i.test(message)) return 'ERROR';
+  if (/did not stop in time|force killing|skipped|did not start listening|still busy/i.test(message)) return 'WARN';
   return 'INFO';
 }
 

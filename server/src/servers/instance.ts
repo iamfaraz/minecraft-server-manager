@@ -9,6 +9,7 @@ import { bus } from '../events.js';
 import { serverRoot, serverDir, serverRecordFile } from '../store.js';
 import { readJson, stripAnsi, which, writeJson, HttpError } from '../util.js';
 import { parseLine, type ParsedEvent } from './logparser.js';
+import { lingeringTcpSockets, probeNetherNet } from './status.js';
 import { HOST_MARK, bannerLines, defaultStyle, detectStyle, hostPrefix, levelFor, type HostLevel, type LogStyle } from './hostlog.js';
 import type { OnlinePlayer, PingResult, ServerRecord, ServerState, ServerSummary, StatsSample } from './types.js';
 import { ensureJava } from '../versions/runtime.js';
@@ -73,6 +74,9 @@ export class ServerInstance extends EventEmitter {
   private intentionalStop = false;
   private restartTimes: number[] = [];
   private restartTimer: NodeJS.Timeout | null = null;
+  /** Bumped by every start and by a stop that interrupts one, so a start waiting for its port knows it was superseded. */
+  private startSeq = 0;
+  private netherNetRepairs = 0;
   private waiters: { pred: (ev: ParsedEvent | null, line: string) => boolean; resolve: (v: { ev: ParsedEvent | null; line: string }) => void; timer: NodeJS.Timeout }[] = [];
   private seenDirty: NodeJS.Timeout | null = null;
   private lastOom = false;
@@ -288,8 +292,51 @@ export class ServerInstance extends EventEmitter {
     this.intentionalStop = false;
     this.lastOom = false;
     this.setState('starting');
+    const run = ++this.startSeq;
     try {
       await this.checkPortFree();
+    } catch (e) {
+      this.setState('error', (e as Error).message);
+      throw e;
+    }
+    if (this.usesNetherNetListener && (await lingeringTcpSockets(this.rec.port))) {
+      // Finish in the background so the caller is not held for up to a minute; the console shows what is going on.
+      this.waitForPortRelease(run)
+        .then((go) => (go ? this.launch() : undefined))
+        .catch((e) => {
+          this.pushLog(`[Blockhost] Failed to start: ${(e as Error).message}`);
+        });
+      return;
+    }
+    await this.launch();
+  }
+
+  /** Bedrock on NetherNet is the one server here whose TCP listener cannot bind while old connections linger. */
+  private get usesNetherNetListener(): boolean {
+    return this.rec.edition === 'bedrock' && this.rec.transport === 'nethernet';
+  }
+
+  /**
+   * Bedrock binds its NetherNet signaling port without SO_REUSEADDR. While connections from the previous run are
+   * still in TIME_WAIT (60 seconds after each one the server closed, e.g. every status request from the console
+   * broadcaster) that bind fails, and Bedrock carries on without NetherNet and without reporting an error.
+   * So wait until the port is really free. Resolves false if the start was cancelled meanwhile.
+   */
+  private async waitForPortRelease(run: number): Promise<boolean> {
+    const port = this.rec.port;
+    this.pushLog(`[Blockhost] Waiting for port ${port} to be released by the previous run (up to a minute). Bedrock cannot open NetherNet while it is busy.`);
+    const deadline = Date.now() + 75_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (this.startSeq !== run || this.state !== 'starting') return false;
+      if (!(await lingeringTcpSockets(port))) return true;
+    }
+    this.pushLog(`[Blockhost] Port ${port} is still busy after 75 seconds; starting anyway.`);
+    return this.startSeq === run && this.state === 'starting';
+  }
+
+  private async launch(): Promise<void> {
+    try {
       if (this.rec.edition === 'java') {
         await syncJavaProperties(this.rec, this.root);
       } else {
@@ -331,6 +378,7 @@ export class ServerInstance extends EventEmitter {
     }
     const proc = this.proc;
     if (!proc) {
+      this.startSeq++; // cancels a start that is still waiting for its port
       if (this.state !== 'stopped') this.setState('stopped');
       return;
     }
@@ -359,6 +407,30 @@ export class ServerInstance extends EventEmitter {
   kill(): void {
     this.intentionalStop = true;
     this.proc?.kill('SIGKILL');
+  }
+
+  /**
+   * Safety net for the case waitForPortRelease guards against: Bedrock says "Server started" even when its NetherNet
+   * listener failed to bind. If nothing answers on the signaling port, restart once the port is free. Two tries at
+   * most per healthy start, so a server that genuinely cannot listen is not restarted forever.
+   */
+  private async verifyNetherNet(proc: ChildProcess | null): Promise<void> {
+    for (let i = 0; i < 4; i++) {
+      if ((await probeNetherNet('127.0.0.1', this.rec.port, 1500)).ok) {
+        this.netherNetRepairs = 0;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+      if (this.proc !== proc || this.state !== 'running') return;
+    }
+    if (this.netherNetRepairs >= 2) {
+      this.pushLog(`[Blockhost] NetherNet is still not listening on port ${this.rec.port} after ${this.netherNetRepairs} restarts; not retrying. Players cannot join until this is fixed (check that nothing else uses the port).`);
+      return;
+    }
+    this.netherNetRepairs++;
+    this.pushLog(`[Blockhost] NetherNet did not start listening on port ${this.rec.port}, so players could not join. Restarting the server to fix it.`);
+    await this.stop();
+    await this.start();
   }
 
   private onLine(line: string) {
@@ -392,6 +464,7 @@ export class ServerInstance extends EventEmitter {
       case 'started':
         if (this.state === 'starting') this.setState('running');
         this.restartTimes = [];
+        if (this.usesNetherNetListener) this.verifyNetherNet(this.proc).catch(() => {});
         break;
       case 'uuid': {
         const s = this.seen.get(ev.name.toLowerCase()) || { name: ev.name, lastSeen: new Date().toISOString() };

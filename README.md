@@ -85,6 +85,8 @@ The manager writes `transport`, `server-port`, `server-portv6`, `server-udp-port
 
 LAN discovery in bridge mode never works (broadcasts don't cross the Docker bridge); players must use *Add Server* with the host IP and port.
 
+**Restarts on NetherNet can take up to a minute.** Bedrock cannot open its NetherNet port while connections from the previous run are still held by the operating system, which lasts 60 seconds after the last one closes; it then starts without NetherNet and reports no error. Blockhost therefore waits for the port before starting the server and says so in the console. As a safety net it also checks the port after "Server started" and restarts the server (twice at most) if nothing is listening.
+
 ### Console players (Switch, Xbox, PlayStation)
 
 Consoles can't type in a server address. Under a Bedrock server's **Settings → Console players**, turn on *Show this server in the Xbox Live Friends tab*:
