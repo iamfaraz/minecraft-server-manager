@@ -11,7 +11,26 @@ export interface ListedPlayer {
   permission?: string;
 }
 
+export interface RosterEntry {
+  name: string;
+  id?: string;
+  online: boolean;
+  joinedAt?: string;
+  lastSeen?: string;
+  ip?: string;
+  allowlisted: boolean;
+  /** java: 'operator' | 'player' ; bedrock: 'operator' | 'member' | 'visitor' | 'default' */
+  permission: string;
+  opLevel?: number;
+  blocked: boolean;
+  blockReason?: string;
+}
+
 export interface PlayersView {
+  /** Every player the server knows about, merged from online, seen, allowlist, operators and blocklist. */
+  roster: RosterEntry[];
+  permissionLevels: string[];
+  defaultPermission: string | null;
   online: { name: string; id?: string; ip?: string; joinedAt: string }[];
   whitelist: ListedPlayer[];
   whitelistEnabled: boolean;
@@ -47,6 +66,61 @@ function xuidFor(inst: ServerInstance, name: string): string | undefined {
   return inst.seen.get(name.toLowerCase())?.id;
 }
 
+function buildRoster(
+  inst: ServerInstance,
+  lists: { whitelist: ListedPlayer[]; ops: ListedPlayer[]; banned: ListedPlayer[] },
+  permById: Map<string, string>,
+): RosterEntry[] {
+  const java = inst.rec.edition === 'java';
+  const map = new Map<string, RosterEntry>();
+  const get = (name: string, id?: string): RosterEntry => {
+    const key = name.toLowerCase();
+    let e = map.get(key);
+    if (!e) {
+      e = { name, id, online: false, allowlisted: false, permission: java ? 'player' : 'default', blocked: false };
+      map.set(key, e);
+    }
+    if (id && !e.id) e.id = id;
+    return e;
+  };
+  for (const s of inst.seen.values()) {
+    const e = get(s.name, s.id);
+    e.lastSeen = s.lastSeen;
+    e.ip = s.ip;
+  }
+  for (const p of inst.players.values()) {
+    const e = get(p.name, p.id);
+    e.online = true;
+    e.joinedAt = p.joinedAt;
+    e.ip = p.ip ?? e.ip;
+  }
+  for (const w of lists.whitelist) if (w.name) get(w.name, w.id).allowlisted = true;
+  for (const o of lists.ops) {
+    if (!o.name) continue;
+    const e = get(o.name, o.id);
+    e.permission = 'operator';
+    e.opLevel = o.level;
+  }
+  for (const b of lists.banned) {
+    if (!b.name) continue;
+    const e = get(b.name, b.id);
+    e.blocked = true;
+    e.blockReason = b.reason;
+  }
+  if (!java) {
+    for (const e of map.values()) {
+      const perm = e.id ? permById.get(e.id) : undefined;
+      if (perm) e.permission = perm;
+    }
+    for (const b of inst.blocked.values()) {
+      const e = get(b.name, b.id);
+      e.blocked = true;
+      e.blockReason = b.reason;
+    }
+  }
+  return [...map.values()].sort((a, b) => Number(b.online) - Number(a.online) || (b.lastSeen || '').localeCompare(a.lastSeen || '') || a.name.localeCompare(b.name));
+}
+
 export async function getPlayers(inst: ServerInstance): Promise<PlayersView> {
   const root = inst.root;
   const props = await PropertiesFile.load(path.join(root, 'server.properties'));
@@ -56,37 +130,99 @@ export async function getPlayers(inst: ServerInstance): Promise<PlayersView> {
     const wl = await readJson<any[]>(path.join(root, 'whitelist.json'), []);
     const ops = await readJson<any[]>(path.join(root, 'ops.json'), []);
     const banned = await readJson<any[]>(path.join(root, 'banned-players.json'), []);
-    return {
-      online: [...inst.players.values()],
+    const lists = {
       whitelist: wl.map((w) => ({ name: w.name, id: w.uuid })),
-      whitelistEnabled: props.get('white-list') === 'true',
       ops: ops.map((o) => ({ name: o.name, id: o.uuid, level: o.level })),
       banned: banned.map((b) => ({ name: b.name, id: b.uuid, reason: b.reason })),
+    };
+    return {
+      roster: buildRoster(inst, lists, new Map()),
+      permissionLevels: ['player', 'operator'],
+      defaultPermission: null,
+      online: [...inst.players.values()],
+      ...lists,
+      whitelistEnabled: props.get('white-list') === 'true',
       seen,
       running: inst.state === 'running',
     };
   }
   const al = await readJson<any[]>(path.join(root, 'allowlist.json'), []);
   const perms = await readJson<any[]>(path.join(root, 'permissions.json'), []);
-  return {
-    online: [...inst.players.values()],
+  const nameOfAny = (id?: string) => (id ? [...inst.seen.values()].find((x) => x.id === id)?.name : undefined) || nameOf(id);
+  const lists = {
     whitelist: al.map((a) => ({ name: a.name, id: a.xuid })),
+    ops: perms.filter((p) => p.permission === 'operator').map((p) => ({ name: nameOfAny(p.xuid) || p.xuid, id: p.xuid, permission: p.permission })),
+    banned: [...inst.blocked.values()].map((b) => ({ name: b.name, id: b.id, reason: b.reason })),
+  };
+  const permById = new Map<string, string>(perms.filter((p) => p.xuid).map((p) => [String(p.xuid), String(p.permission)]));
+  return {
+    roster: buildRoster(inst, lists, permById),
+    permissionLevels: ['visitor', 'member', 'operator'],
+    defaultPermission: props.get('default-player-permission-level') || 'member',
+    online: [...inst.players.values()],
+    ...lists,
     whitelistEnabled: props.get('allow-list') === 'true',
-    ops: perms.filter((p) => p.permission === 'operator').map((p) => ({ name: nameOf(p.xuid) || p.xuid, id: p.xuid, permission: p.permission })),
-    banned: [],
     seen,
     running: inst.state === 'running',
   };
 }
 
-export type PlayerAction = 'whitelist-add' | 'whitelist-remove' | 'whitelist-on' | 'whitelist-off' | 'op' | 'deop' | 'kick' | 'ban' | 'pardon';
+export type PlayerAction = 'whitelist-add' | 'whitelist-remove' | 'whitelist-on' | 'whitelist-off' | 'op' | 'deop' | 'kick' | 'ban' | 'pardon' | 'block' | 'unblock' | 'permission';
 
 const q = (name: string) => (/\s/.test(name) ? `"${name}"` : name);
 
-export async function playerAction(inst: ServerInstance, action: PlayerAction, name: string, reason?: string): Promise<{ message: string }> {
+/** Bedrock: set visitor / member / operator in permissions.json and reload it live. Needs the player's XUID. */
+async function setBedrockPermission(inst: ServerInstance, name: string, level: string): Promise<{ message: string }> {
+  if (!['visitor', 'member', 'operator', 'default'].includes(level)) throw bad('Permission must be visitor, member, operator or default');
+  const running = inst.state === 'running';
+  const xuid = xuidFor(inst, name) || inst.players.get(name.toLowerCase())?.id;
+  if (!xuid) {
+    if (running && level === 'operator') {
+      inst.send(`op ${q(name)}`);
+      return { message: 'Op command sent. Bedrock only knows players who are online or have joined before.' };
+    }
+    throw bad(`${name} has not joined this server yet, so their Xbox ID is unknown. Ask them to join once first.`);
+  }
+  const f = path.join(inst.root, 'permissions.json');
+  const list = (await readJson<any[]>(f, [])).filter((x) => x.xuid !== xuid);
+  if (level !== 'default') list.push({ permission: level, xuid });
+  await writeJson(f, list);
+  if (running) {
+    inst.send('permission reload');
+    // Online players only pick up the change through op/deop.
+    if (inst.players.has(name.toLowerCase())) inst.send(level === 'operator' ? `op ${q(name)}` : `deop ${q(name)}`);
+  }
+  return { message: level === 'default' ? `${name} now uses the default permission` : `${name} is now ${level === 'operator' ? 'an operator' : `a ${level}`}` };
+}
+
+export async function playerAction(inst: ServerInstance, action: PlayerAction, name: string, reason?: string, level?: string): Promise<{ message: string }> {
   name = (name || '').trim();
   const running = inst.state === 'running';
   const java = inst.rec.edition === 'java';
+
+  // Edition-neutral aliases used by the roster UI.
+  if (action === 'permission') {
+    if (!name) throw bad('Player name is required');
+    if (!java) return setBedrockPermission(inst, name, String(level || ''));
+    if (level !== 'operator' && level !== 'player') throw bad('Permission must be operator or player');
+    action = level === 'operator' ? 'op' : 'deop';
+  }
+  if (action === 'block' || action === 'unblock') {
+    if (!name) throw bad('Player name is required');
+    if (java) action = action === 'block' ? 'ban' : 'pardon';
+    else {
+      const key = name.toLowerCase();
+      if (action === 'block') {
+        inst.blocked.set(key, { name, id: xuidFor(inst, name) || inst.players.get(key)?.id, reason: (reason || '').slice(0, 120) || undefined, at: new Date().toISOString() });
+        await inst.saveBlocked();
+        if (running && inst.players.has(key)) inst.send(`kick ${q(name)} ${reason || 'You are blocked from this server'}`);
+        return { message: `${name} is blocked and will be removed whenever they join` };
+      }
+      inst.blocked.delete(key);
+      await inst.saveBlocked();
+      return { message: `${name} is no longer blocked` };
+    }
+  }
   if (!['whitelist-on', 'whitelist-off'].includes(action) && !name) throw bad('Player name is required');
   if (name.length > 32 || /[\r\n]/.test(name)) throw bad('Invalid player name');
 
@@ -114,6 +250,9 @@ export async function playerAction(inst: ServerInstance, action: PlayerAction, n
           pardon: `pardon ${name}`,
           'whitelist-on': null,
           'whitelist-off': null,
+          block: null,
+          unblock: null,
+          permission: null,
         }
       : {
           'whitelist-add': `allowlist add ${q(name)}`,
@@ -125,6 +264,9 @@ export async function playerAction(inst: ServerInstance, action: PlayerAction, n
           pardon: null,
           'whitelist-on': null,
           'whitelist-off': null,
+          block: null,
+          unblock: null,
+          permission: null,
         };
     const c = cmd[action];
     if (!c) throw bad(`${action} is not supported on ${java ? 'Java' : 'Bedrock'}`);

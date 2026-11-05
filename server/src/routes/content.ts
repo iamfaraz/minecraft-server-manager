@@ -6,6 +6,7 @@ import { backupFile, createBackup, deleteBackup, listBackups, restoreBackup } fr
 import { getPlayers, playerAction, type PlayerAction } from '../players.js';
 import * as addons from '../addons.js';
 import * as mods from '../modupdates.js';
+import * as world from '../world.js';
 import * as files from '../files.js';
 import fs from 'node:fs';
 import type { BackupScope } from '../servers/types.js';
@@ -32,9 +33,13 @@ export async function contentRoutes(app: FastifyInstance) {
 
   /* ---------------- Players ---------------- */
   app.get<{ Params: { id: string } }>('/api/servers/:id/players', async (req) => getPlayers(manager.get(req.params.id)));
-  app.post<{ Params: { id: string }; Body: { action: PlayerAction; name: string; reason?: string } }>('/api/servers/:id/players/action', async (req) =>
-    playerAction(manager.get(req.params.id), req.body?.action, req.body?.name, req.body?.reason),
+  app.post<{ Params: { id: string }; Body: { action: PlayerAction; name: string; reason?: string; level?: string } }>('/api/servers/:id/players/action', async (req) =>
+    playerAction(manager.get(req.params.id), req.body?.action, req.body?.name, req.body?.reason, req.body?.level),
   );
+
+  /* ---------------- Live world controls ---------------- */
+  app.get<{ Params: { id: string }; Querystring: { refresh?: string } }>('/api/servers/:id/world', async (req) => world.getWorld(manager.get(req.params.id), req.query.refresh === '1'));
+  app.post<{ Params: { id: string }; Body: world.WorldAction }>('/api/servers/:id/world', async (req) => world.applyWorld(manager.get(req.params.id), req.body));
 
   /* ---------------- Backups ---------------- */
   app.get<{ Params: { id: string } }>('/api/servers/:id/backups', async (req) => {

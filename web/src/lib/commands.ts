@@ -34,17 +34,36 @@ const DIFF = ['peaceful', 'easy', 'normal', 'hard'];
 const TF: Arg = { values: ['true', 'false'] };
 const SELECTORS = ['@a', '@p', '@r', '@s', '@e'];
 
+/** Java 26.x / 1.21.11+ game rules (snake_case), as reported by a real 26.3 server. */
 const GAMERULES_JAVA = [
+  'keep_inventory', 'advance_time', 'advance_weather', 'pvp', 'spawn_mobs', 'spawn_monsters', 'mob_griefing', 'fire_spread_radius_around_player', 'immediate_respawn',
+  'players_sleeping_percentage', 'natural_health_regeneration', 'show_death_messages', 'show_advancement_messages', 'spawn_phantoms', 'spawn_patrols', 'spawn_wandering_traders',
+  'spawn_wardens', 'raids', 'block_drops', 'mob_drops', 'entity_drops', 'fall_damage', 'fire_damage', 'drowning_damage', 'freeze_damage', 'random_tick_speed', 'reduced_debug_info',
+  'locator_bar', 'send_command_feedback', 'command_block_output', 'respawn_radius', 'tnt_explodes', 'forgive_dead_players', 'universal_anger', 'max_entity_cramming',
+  'limited_crafting', 'projectiles_can_break_blocks', 'ender_pearls_vanish_on_death', 'water_source_conversion', 'lava_source_conversion', 'command_blocks_work',
+  'spawner_blocks_work', 'allow_entering_nether_using_portals', 'global_sound_events', 'log_admin_commands', 'spectators_generate_chunks',
+];
+/** Older Java versions use camelCase names. */
+const GAMERULES_JAVA_LEGACY = [
   'keepInventory', 'doDaylightCycle', 'doWeatherCycle', 'doMobSpawning', 'mobGriefing', 'doFireTick', 'doImmediateRespawn', 'playersSleepingPercentage',
   'randomTickSpeed', 'showDeathMessages', 'naturalRegeneration', 'doInsomnia', 'announceAdvancements', 'commandBlockOutput', 'sendCommandFeedback',
-  'spawnRadius', 'fallDamage', 'fireDamage', 'drowningDamage', 'freezeDamage', 'doTileDrops', 'doMobLoot', 'doEntityDrops', 'maxEntityCramming', 'pvp',
-  'keep_inventory', 'advance_time', 'advance_weather', 'spawn_mobs', 'mob_griefing', 'immediate_respawn', 'players_sleeping_percentage', 'random_tick_speed', 'show_death_messages', 'natural_health_regeneration',
+  'spawnRadius', 'fallDamage', 'fireDamage', 'drowningDamage', 'freezeDamage', 'doTileDrops', 'doMobLoot', 'doEntityDrops', 'maxEntityCramming',
+  'doPatrolSpawning', 'doTraderSpawning', 'doWardenSpawning', 'disableRaids', 'reducedDebugInfo', 'locatorBar', 'tntExplodes',
 ];
 const GAMERULES_BEDROCK = [
-  'keepinventory', 'dodaylightcycle', 'doweathercycle', 'domobspawning', 'mobgriefing', 'dofiretick', 'doimmediaterespawn', 'playerssleepingpercentage', 'randomtickspeed',
-  'showcoordinates', 'showdeathmessages', 'naturalregeneration', 'doinsomnia', 'commandblockoutput', 'sendcommandfeedback', 'spawnradius', 'falldamage', 'firedamage',
-  'drowningdamage', 'freezedamage', 'dotiledrops', 'domobloot', 'doentitydrops', 'pvp', 'tntexplodes', 'respawnblocksexplode', 'showtags', 'recipesunlock', 'locatorbar',
+  'keepInventory', 'doDayLightCycle', 'doWeatherCycle', 'doMobSpawning', 'mobGriefing', 'doFireTick', 'doImmediateRespawn', 'playersSleepingPercentage', 'randomTickSpeed',
+  'showCoordinates', 'showDaysPlayed', 'locatorbar', 'showTags', 'showDeathMessages', 'showRecipeMessages', 'showBorderEffect', 'naturalRegeneration', 'doInsomnia',
+  'commandBlockOutput', 'commandBlocksEnabled', 'sendCommandFeedback', 'spawnRadius', 'fallDamage', 'fireDamage', 'drowningDamage', 'freezeDamage', 'doTileDrops', 'doMobLoot',
+  'doEntityDrops', 'pvp', 'tntExplodes', 'respawnBlocksExplode', 'recipesUnlock', 'doLimitedCrafting', 'projectilesCanBreakBlocks', 'tntExplosionDropDecay', 'playerWaypoints',
+  'maxCommandChainLength', 'functionCommandLimit',
 ];
+/** Java game rules were renamed to snake_case in 1.21.11 and the year-based versions. */
+function usesNewRuleNames(version: string | undefined): boolean {
+  const m = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(version || '');
+  if (!m) return true;
+  const [a, b, c] = [+m[1], +m[2], +(m[3] || 0)];
+  return a >= 26 || (a === 1 && (b > 21 || (b === 21 && c >= 11)));
+}
 const EFFECTS = ['speed', 'slowness', 'haste', 'strength', 'instant_health', 'jump_boost', 'regeneration', 'resistance', 'fire_resistance', 'water_breathing', 'invisibility', 'night_vision', 'saturation', 'glowing', 'levitation', 'slow_falling'];
 
 const JAVA: Cmd[] = [
@@ -206,9 +225,9 @@ const BEDROCK: Cmd[] = [
   { name: 'schedule', desc: 'Schedule a function', usage: 'schedule <on_area_loaded|delay|clear> ...', args: { values: ['on_area_loaded', 'delay', 'clear'] } },
 ];
 
-export function commandsFor(s: Pick<ServerSummary, 'edition' | 'type' | 'geyser'>): Cmd[] {
+export function commandsFor(s: Pick<ServerSummary, 'edition' | 'type' | 'geyser'> & { version?: string }): Cmd[] {
   if (s.edition === 'bedrock') return BEDROCK;
-  const list = [...JAVA];
+  const list = JAVA.map((c) => (c.name === 'gamerule' && !usesNewRuleNames(s.version) ? { ...c, args: { ...c.args, values: GAMERULES_JAVA_LEGACY } } : c));
   if (s.type === 'PAPER' || s.type === 'PURPUR') list.push(...PAPER_EXTRA);
   if (s.geyser) list.push(...GEYSER_EXTRA);
   return list.sort((a, b) => a.name.localeCompare(b.name));
@@ -221,7 +240,7 @@ function quoteIfNeeded(name: string, edition: string): string {
   return edition === 'bedrock' && /\s/.test(name) ? `"${name}"` : name;
 }
 
-export function suggest(s: Pick<ServerSummary, 'edition' | 'type' | 'geyser'>, input: string, players: string[]): SuggestResult {
+export function suggest(s: Pick<ServerSummary, 'edition' | 'type' | 'geyser'> & { version?: string }, input: string, players: string[]): SuggestResult {
   const slash = input.startsWith('/') ? '/' : '';
   const body = input.slice(slash.length);
   const parts = body.split(/\s+/);

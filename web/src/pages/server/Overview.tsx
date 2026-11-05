@@ -8,6 +8,7 @@ import type { ServerSummary, StatsSample, WsEvent } from '../../lib/types';
 import { useWsEvent } from '../../lib/ws';
 import { Card, EmptyState, Stat } from '../../components/ui';
 import { TYPE_LABEL } from '../../lib/types';
+import { WorldControls } from './WorldControls';
 
 function Chart({ data, keyName, color, unit, max }: { data: StatsSample[]; keyName: 'cpu' | 'memMb'; color: string; unit: string; max?: number }) {
   if (data.length < 2) return <div className="flex h-44 items-center justify-center text-sm text-muted">Collecting samples…</div>;
@@ -66,6 +67,8 @@ export function Overview({ s }: { s: ServerSummary }) {
           <Chart data={samples} keyName="memMb" color="#a78bfa" unit=" MB" max={s.java ? Math.round(s.java.xmxMb * 1.3) : undefined} />
         </Card>
       </div>
+
+      <WorldControls s={s} />
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Card title="Online players" padded={false} className="lg:col-span-1">

@@ -198,3 +198,12 @@ export function ConfirmModal({ open, onClose, onConfirm, title, body, confirmLab
     </Modal>
   );
 }
+
+/** Compact on/off switch for dense lists (game rules, player roster). */
+export function MiniSwitch({ on, busy, onChange, title }: { on: boolean; busy?: boolean; onChange: (v: boolean) => void; title?: string }) {
+  return (
+    <button type="button" title={title} disabled={busy} onClick={() => onChange(!on)} className={clsx('relative inline-flex h-5.5 w-10 shrink-0 items-center rounded-full transition disabled:opacity-60', on ? 'bg-accent' : 'bg-white/15')} aria-pressed={on}>
+      <span className={clsx('inline-block size-4.5 rounded-full bg-white shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0.5')} />
+    </button>
+  );
+}

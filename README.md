@@ -10,7 +10,10 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **Import any world.** Upload a `.zip`/`.mcworld`, upload a folder from your browser, or drop a world into `data/imports/` on the host, then create a new server from it. Java and Bedrock worlds are detected automatically (including Paper-style nether/end folders).
 - **Update in place or branch off.** Change a server's version/flavor while keeping its world, configs, plugins and mods (a world backup is taken first), or create a brand-new server on another version and import the world from an existing server or one of its backups.
 - **Safe hot backups.** Running servers are frozen through the proper console pipeline (`save-off`/`save-all flush` on Java, `save hold`/`save query` with byte-exact truncation on Bedrock) so backups are consistent without kicking anyone. Manual and scheduled, with retention.
-- **Live console** (stdin/stdout, no RCON needed), **telemetry** (CPU, memory, players, ping via Server List Ping / RakNet), **player management** (whitelist/allowlist, ops, bans, kicks; Mojang UUID lookup; offline-mode UUIDs), **addons** (Modrinth search + one-click install with dependencies for plugins/mods; `.mcpack`/`.mcaddon` install for Bedrock), **jailed file manager** with editor, and a **server.properties** editor.
+- **Live console** with slash-command suggestions and Tab completion (commands, arguments, game rules and player names for the server's edition and version).
+- **Live controls on the Overview page:** set the time and weather, change difficulty, broadcast a message, save the world, and flip **game rules** with switches. Values are read back from the running server, so the switches show its real state. Rule names follow the server: snake_case on Java 26.x / 1.21.11+ (`keep_inventory`, `advance_time`), camelCase on older Java and on Bedrock, where the display rules live (`showCoordinates`, `showDaysPlayed`, `locatorbar`).
+- **Player roster:** one table of every player the server knows, with who is online now, last seen, an allowlist switch, a permission selector (Player/Operator on Java; Visitor/Member/Operator on Bedrock), block/unblock and kick. Works whether the server is running or stopped. Bedrock has no ban command, so Blockhost keeps a blocklist itself and removes blocked players as they join.
+- **Telemetry** (CPU, memory, players, ping via Server List Ping / RakNet), **addons** (Modrinth search + one-click install with dependencies for plugins/mods; `.mcpack`/`.mcaddon` install for Bedrock), **jailed file manager** with editor, and a **server.properties** editor.
 - **Cross-play:** one toggle installs [Geyser](https://geysermc.org) + [Floodgate](https://github.com/GeyserMC/Floodgate) on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers. Geyser is configured per server through its `GEYSER_*` environment overrides (port from the very first start, RakNet and NetherNet both enabled, advertised address for Docker bridge mode), its Bedrock side is health-checked, and the console broadcast toggle works for these servers too.
 - **Remote play without port forwarding:** built-in [playit.gg](https://playit.gg) agent. Enable it, claim it once in your browser, then create a tunnel per server from the UI to get a public address.
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
@@ -94,6 +97,23 @@ Already running the standalone container? Stop it and reuse its login: copy `con
 ### Apple Silicon and other ARM hosts
 
 Bedrock Dedicated Server is x86_64-only. The ARM image bundles [box64](https://github.com/ptitSeb/box64) and runs BDS through it automatically; Java servers run natively. If you'd rather run everything as x86_64 under Rosetta/QEMU, uncomment `platform: linux/amd64` in the compose file.
+
+## Live controls, game rules and players
+
+**Overview → Live controls** appears while a server is running:
+
+- *Time of day* (day, noon, night, midnight), *weather* (clear, rain, thunder), *difficulty*, *broadcast a message*, and *save world now* (Java).
+- *Game rules*, grouped as Display, Gameplay, World, Mobs, Damage and Drops. Each rule is a switch or a number field. The values come from the server's own answers (`gamerule …`), refreshed every minute or on demand; those background queries are kept out of the console log. Difficulty is also written to `server.properties` so it survives a restart.
+- Display rules are where "show coordinates" and "show days played" live on Bedrock. Java has no on-screen coordinate rule; the nearest equivalents are the locator bar and *Hide coordinates in debug screen*.
+
+**Players tab** lists everyone the server knows about (online, previously seen, allowlisted, operators and blocked), with filters and search:
+
+| Action | Java | Bedrock |
+| --- | --- | --- |
+| Allowlist switch | `whitelist add/remove`, or `whitelist.json` when stopped | `allowlist add/remove`, or `allowlist.json` when stopped |
+| Permission | Player / Operator (`op`, `deop`, `ops.json`) | Default / Visitor / Member / Operator (`permissions.json` + `permission reload`); needs the player to have joined once so their Xbox ID is known |
+| Block / Unblock | The server's ban list (`ban`, `pardon`) | Blockhost-managed blocklist (`data/servers/<id>/blocklist.json`); blocked players are kicked as they join |
+| Kick | `kick` | `kick` |
 
 ## Remote play (playit.gg)
 

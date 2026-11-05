@@ -17,6 +17,13 @@ import { syncBedrockProperties, resolveAdvertiseIp } from '../install/bedrock.js
 const LOG_RING = 1000;
 const STATS_RING = 180; // 15 min at 5s
 
+export interface BlockedPlayer {
+  name: string;
+  id?: string;
+  reason?: string;
+  at: string;
+}
+
 export interface SeenPlayer {
   name: string;
   id?: string;
@@ -64,6 +71,10 @@ export class ServerInstance extends EventEmitter {
   private waiters: { pred: (ev: ParsedEvent | null, line: string) => boolean; resolve: (v: { ev: ParsedEvent | null; line: string }) => void; timer: NodeJS.Timeout }[] = [];
   private seenDirty: NodeJS.Timeout | null = null;
   private lastOom = false;
+  private muted: { until: number; re: RegExp } | null = null;
+  private taps = new Set<(line: string) => void>();
+  /** Blockhost-managed blocklist (Bedrock has no ban command): blocked players are kicked as they join. */
+  blocked = new Map<string, BlockedPlayer>();
 
   constructor(public rec: ServerRecord) {
     super();
@@ -85,6 +96,36 @@ export class ServerInstance extends EventEmitter {
   async load(): Promise<void> {
     const seen = await readJson<SeenPlayer[]>(path.join(this.dir, 'players.json'), []);
     for (const s of seen) this.seen.set(s.name.toLowerCase(), s);
+    const blocked = await readJson<BlockedPlayer[]>(path.join(this.dir, 'blocklist.json'), []);
+    for (const b of blocked) this.blocked.set(b.name.toLowerCase(), b);
+  }
+
+  async saveBlocked(): Promise<void> {
+    await writeJson(path.join(this.dir, 'blocklist.json'), [...this.blocked.values()]);
+  }
+
+  isBlocked(name: string, id?: string): BlockedPlayer | undefined {
+    const byName = this.blocked.get(name.toLowerCase());
+    if (byName) return byName;
+    if (id) for (const b of this.blocked.values()) if (b.id && b.id === id) return b;
+    return undefined;
+  }
+
+  /** Send a command without echoing it into the console log (used for background status queries). */
+  sendSilent(command: string): void {
+    if (!this.proc?.stdin?.writable) throw new HttpError(409, 'Server is not running');
+    this.proc.stdin.write(command.replace(/^\//, '').trim() + '\n');
+  }
+
+  /** Hide console lines matching `re` for a short while, so status queries do not flood the log. */
+  muteOutput(re: RegExp, ms: number): void {
+    this.muted = { until: Date.now() + ms, re };
+  }
+
+  /** Observe every output line until the returned function is called. */
+  tap(fn: (line: string) => void): () => void {
+    this.taps.add(fn);
+    return () => this.taps.delete(fn);
   }
 
   async save(): Promise<void> {
@@ -300,7 +341,9 @@ export class ServerInstance extends EventEmitter {
   }
 
   private onLine(line: string) {
-    this.pushLog(line);
+    const hidden = this.muted && Date.now() < this.muted.until && this.muted.re.test(line);
+    if (!hidden) this.pushLog(line);
+    for (const t of this.taps) t(line);
     if (/OutOfMemoryError/.test(line)) this.lastOom = true;
     const ev = parseLine(this.rec.edition, line);
     if (ev) this.handleEvent(ev);
@@ -341,6 +384,7 @@ export class ServerInstance extends EventEmitter {
         this.seen.set(key, { name: ev.name, id: p.id ?? seen?.id, ip: p.ip ?? seen?.ip, lastSeen: new Date().toISOString() });
         this.persistSeen();
         this.emitPlayers();
+        this.enforceBlock(ev.name, p.id);
         break;
       }
       case 'leave':
@@ -352,6 +396,23 @@ export class ServerInstance extends EventEmitter {
       default:
         break;
     }
+  }
+
+  /** Bedrock: remove a blocked player shortly after they connect (retry once in case they were still loading). */
+  private enforceBlock(name: string, id?: string) {
+    if (this.rec.edition !== 'bedrock') return;
+    const b = this.isBlocked(name, id);
+    if (!b) return;
+    const kick = () => {
+      if (!this.players.has(name.toLowerCase()) || !this.proc) return;
+      try {
+        this.send(`kick "${name}" ${b.reason || 'You are blocked from this server'}`);
+      } catch {
+        /* server went away */
+      }
+    };
+    setTimeout(kick, 800);
+    setTimeout(kick, 6000);
   }
 
   private emitPlayers() {
