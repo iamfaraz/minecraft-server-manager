@@ -39,13 +39,13 @@ COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x64) \
     && for J in 21 25; do \
          mkdir -p /opt/java/$J \
-         && curl -fsSL "https://api.adoptium.net/v3/binary/latest/$J/ga/linux/${ARCH}/jre/hotspot/normal/eclipse" \
+         && curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 --connect-timeout 20 "https://api.adoptium.net/v3/binary/latest/$J/ga/linux/${ARCH}/jre/hotspot/normal/eclipse" \
             | tar -xz -C /opt/java/$J --strip-components=1 ; \
        done
 
 # Bedrock Dedicated Server is x86_64 only: on ARM hosts run it through box64
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      ( curl -fsSL https://ryanfortner.github.io/box64-debs/KEY.gpg | gpg --dearmor -o /usr/share/keyrings/box64-debs-archive-keyring.gpg \
+      ( curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 --connect-timeout 20 https://ryanfortner.github.io/box64-debs/KEY.gpg | gpg --dearmor -o /usr/share/keyrings/box64-debs-archive-keyring.gpg \
         && echo "deb [signed-by=/usr/share/keyrings/box64-debs-archive-keyring.gpg] https://ryanfortner.github.io/box64-debs/debian ./" > /etc/apt/sources.list.d/box64.list \
         && apt-get update && apt-get install -y --no-install-recommends box64 \
         && rm -rf /var/lib/apt/lists/* ) \
@@ -54,15 +54,15 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 
 # playit.gg agent for remote play (falls back to a runtime download if this fails)
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo amd64) \
-    && ( curl -fsSL -o /usr/local/bin/playit "https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}/playit-linux-${ARCH}" \
+    && ( curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 --connect-timeout 20 -o /usr/local/bin/playit "https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}/playit-linux-${ARCH}" \
          && chmod +x /usr/local/bin/playit ) \
     || echo "WARNING: playit download failed; it will be fetched at runtime when enabled"
 
 # MCXboxBroadcast (GPL-3.0, run as a separate process) lets console players join via the Xbox Live Friends tab
 ARG MCXB_VERSION=162
 RUN mkdir -p /opt/mcxboxbroadcast \
-    && ( curl -fsSL -o /opt/mcxboxbroadcast/MCXboxBroadcastStandalone.jar "https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar" \
-         && curl -fsSL -o /opt/mcxboxbroadcast/LICENSE "https://raw.githubusercontent.com/MCXboxBroadcast/Broadcaster/${MCXB_VERSION}/LICENSE" \
+    && ( curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 --connect-timeout 20 -o /opt/mcxboxbroadcast/MCXboxBroadcastStandalone.jar "https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar" \
+         && curl -fsSL --retry 5 --retry-all-errors --retry-delay 4 --connect-timeout 20 -o /opt/mcxboxbroadcast/LICENSE "https://raw.githubusercontent.com/MCXboxBroadcast/Broadcaster/${MCXB_VERSION}/LICENSE" \
          && printf 'MCXboxBroadcast Standalone build %s (unmodified)\nSource: https://github.com/MCXboxBroadcast/Broadcaster/tree/%s\nLicense: GPL-3.0, see LICENSE\n' "${MCXB_VERSION}" "${MCXB_VERSION}" > /opt/mcxboxbroadcast/NOTICE ) \
     || echo "WARNING: MCXboxBroadcast download failed; it will be fetched at runtime when enabled"
 
