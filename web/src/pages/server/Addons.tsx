@@ -296,6 +296,30 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
   );
 }
 
+/** Bedrock: force clients to accept the server's resource (texture) packs instead of letting them decline. */
+function RequirePacks({ s }: { s: ServerSummary }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const props = useQuery({ queryKey: ['props', s.id], queryFn: () => api.get<{ properties: Record<string, string> }>(`/api/servers/${s.id}/properties`) });
+  const set = useMutation({
+    mutationFn: (v: boolean) => api.put(`/api/servers/${s.id}/properties`, { properties: { 'texturepack-required': String(v) } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['props', s.id] });
+      toast.success(s.state === 'running' ? 'Saved. Restart the server to apply.' : 'Saved');
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  return (
+    <Toggle
+      checked={props.data?.properties['texturepack-required'] === 'true'}
+      disabled={props.isLoading || set.isPending}
+      onChange={(v) => set.mutate(v)}
+      label="Require players to use the server's texture packs"
+      description="When off, players are asked and may join without them. Applies after a restart."
+    />
+  );
+}
+
 export function Addons({ s }: { s: ServerSummary }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -431,7 +455,7 @@ export function Addons({ s }: { s: ServerSummary }) {
               ))}
             </ul>
           ) : (
-            <EmptyState icon={Package} title="No packs installed" description="Upload a .mcpack or .mcaddon. Packs are extracted and activated on the current world; restart to apply." />
+            <EmptyState icon={Package} title="No packs installed" description="Upload a texture (resource) pack or behavior pack as .mcpack, or a .mcaddon bundle. Packs are extracted and activated on the current world; restart to apply." />
           )
         ) : null}
         {s.state === 'running' && <p className="border-t border-line px-5 py-2 text-xs text-muted">Changes take effect after a restart.</p>}
@@ -480,8 +504,12 @@ export function Addons({ s }: { s: ServerSummary }) {
           )}
         </Card>
       ) : (
-        <Card title="About Bedrock packs">
-          <ul className="space-y-2 text-sm text-muted">
+        <Card title="Texture and behavior packs">
+          <RequirePacks s={s} />
+          <ul className="mt-4 space-y-2 text-sm text-muted">
+            <li>
+              <span className="text-ink">Texture packs</span> are resource packs. Upload the <span className="font-mono">.mcpack</span> on the left; players download it from the server automatically when they join.
+            </li>
             <li>
               <span className="text-ink">.mcpack</span> contains a single behavior or resource pack; <span className="text-ink">.mcaddon</span> bundles several.
             </li>

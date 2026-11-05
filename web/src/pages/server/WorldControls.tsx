@@ -25,6 +25,7 @@ interface World {
   rules: Rule[];
   readAt: string | null;
   canSave: boolean;
+  silent: boolean;
 }
 
 const GROUP_ORDER = ['Display', 'Gameplay', 'World', 'Mobs', 'Damage', 'Drops', 'Advanced'];
@@ -52,7 +53,7 @@ export function WorldControls({ s }: { s: ServerSummary }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const act = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.post<{ message: string }>(`/api/servers/${s.id}/world`, body),
+    mutationFn: (body: Record<string, unknown>) => api.post<{ message: string; unconfirmed?: boolean }>(`/api/servers/${s.id}/world`, body),
     onMutate: (body) => setPending(String(body.name ?? body.type) + String(body.value ?? '')),
     onSuccess: (r, body) => {
       qc.setQueryData<World>(['world', s.id], (old) => {
@@ -63,6 +64,8 @@ export function WorldControls({ s }: { s: ServerSummary }) {
         return old;
       });
       if (body.type !== 'gamerule') toast.success(r.message);
+      else if (r.unconfirmed) toast.toast(r.message);
+      if (body.type === 'gamerule' && /^send_?command_?feedback$/i.test(String(body.name))) setTimeout(() => refresh.mutate(), 400);
     },
     onError: (e) => {
       toast.error((e as Error).message);
@@ -170,11 +173,22 @@ export function WorldControls({ s }: { s: ServerSummary }) {
           </div>
         }
       >
+        {w?.silent && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm text-amber-100">
+            <span>
+              The server is not answering console queries because <span className="font-mono">sendCommandFeedback</span> is off.{' '}
+              {w.rules.length ? 'The values below are the last ones read and changes cannot be confirmed.' : 'Game rules cannot be read until it is turned back on.'}
+            </span>
+            <button className="btn-primary btn-sm" disabled={act.isPending} onClick={() => act.mutate({ type: 'gamerule', name: 'sendCommandFeedback', value: true })}>
+              Turn command feedback on
+            </button>
+          </div>
+        )}
         {q.isLoading ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted">
             <Spinner /> Reading game rules from the server…
           </div>
-        ) : !groups.length ? (
+        ) : !groups.length && w?.silent ? null : !groups.length ? (
           <p className="px-5 py-6 text-sm text-muted">The server did not report any game rules yet. It may still be starting; press refresh in a moment.</p>
         ) : (
           <div className="divide-y divide-line/60">

@@ -52,7 +52,7 @@ const GAMERULES_JAVA_LEGACY = [
 ];
 const GAMERULES_BEDROCK = [
   'keepInventory', 'doDayLightCycle', 'doWeatherCycle', 'doMobSpawning', 'mobGriefing', 'doFireTick', 'doImmediateRespawn', 'playersSleepingPercentage', 'randomTickSpeed',
-  'showCoordinates', 'showDaysPlayed', 'locatorbar', 'showTags', 'showDeathMessages', 'showRecipeMessages', 'showBorderEffect', 'naturalRegeneration', 'doInsomnia',
+  'showCoordinates', 'showDaysPlayed', 'showTags', 'showDeathMessages', 'showRecipeMessages', 'showBorderEffect', 'naturalRegeneration', 'doInsomnia',
   'commandBlockOutput', 'commandBlocksEnabled', 'sendCommandFeedback', 'spawnRadius', 'fallDamage', 'fireDamage', 'drowningDamage', 'freezeDamage', 'doTileDrops', 'doMobLoot',
   'doEntityDrops', 'pvp', 'tntExplodes', 'respawnBlocksExplode', 'recipesUnlock', 'doLimitedCrafting', 'projectilesCanBreakBlocks', 'tntExplosionDropDecay', 'playerWaypoints',
   'maxCommandChainLength', 'functionCommandLimit',
@@ -171,7 +171,7 @@ const BEDROCK: Cmd[] = [
   { name: 'permission', desc: 'Reload or list permissions', usage: 'permission <list|reload>', args: { values: ['list', 'reload'] } },
   { name: 'gamemode', desc: 'Change a player\'s game mode', usage: 'gamemode <mode> [player]', args: { values: MODES_BEDROCK, then: P } },
   { name: 'difficulty', desc: 'Set the difficulty', usage: 'difficulty <peaceful|easy|normal|hard>', args: { values: DIFF } },
-  { name: 'gamerule', desc: 'Show or change a game rule', usage: 'gamerule <rule> [value]', args: { values: GAMERULES_BEDROCK, then: TF } },
+  { name: 'gamerule', desc: 'Show or change a game rule', usage: 'gamerule <rule> [value]', args: { values: GAMERULES_BEDROCK, then: { '*': TF, playerwaypoints: { values: ['everyone', 'off'] } } } },
   { name: 'changesetting', desc: 'Change a server setting while running', usage: 'changesetting <allow-cheats|difficulty> <value>', args: { values: ['allow-cheats', 'difficulty'], then: { 'allow-cheats': TF, difficulty: { values: DIFF } } } },
   { name: 'setmaxplayers', desc: 'Set the player limit for this session', usage: 'setmaxplayers <count>', args: { hint: '<count>' } },
   { name: 'time', desc: 'Change or query the time', usage: 'time <set|add|query> <value>', args: { values: ['set', 'add', 'query'], then: { set: { values: ['day', 'noon', 'sunset', 'night', 'midnight', 'sunrise'], hint: '<ticks>' }, add: { hint: '<ticks>' }, query: { values: ['daytime', 'gametime', 'day'] } } } },

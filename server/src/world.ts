@@ -23,7 +23,12 @@ interface RuleDef {
   bedrock?: string;
   /** Type override where a platform models the rule differently. */
   javaType?: 'bool' | 'int';
+  /** Bedrock rules that are on/off in spirit but use words: maps the switch to the server's values. */
+  bedrockMap?: { on: string; off: string };
 }
+
+/** Rules Bedrock prints in its list but refuses to change through the gamerule command. */
+const BEDROCK_READ_ONLY = new Set(['locatorbar']);
 
 const R = (key: string, label: string, group: RuleGroup, names: { java?: string; legacy?: string; bedrock?: string }, extra: Partial<RuleDef> = {}): RuleDef => ({ key, label, group, type: 'bool', ...names, ...extra });
 
@@ -31,14 +36,15 @@ export const RULES: RuleDef[] = [
   // What players see
   R('show_coordinates', 'Show coordinates', 'Display', { bedrock: 'showCoordinates' }, { desc: 'Displays each player\'s position on screen.' }),
   R('show_days_played', 'Show days played', 'Display', { bedrock: 'showDaysPlayed' }, { desc: 'Displays the number of in-game days on screen.' }),
-  R('locator_bar', 'Locator bar', 'Display', { java: 'locator_bar', legacy: 'locatorBar', bedrock: 'locatorbar' }, { desc: 'Shows the direction of other players on the HUD.' }),
+  // Bedrock exposes "locatorbar" read-only; the switch that actually controls it is playerWaypoints (everyone | off).
+  R('locator_bar', 'Locator bar', 'Display', { java: 'locator_bar', legacy: 'locatorBar', bedrock: 'playerWaypoints' }, { desc: 'Shows the direction of other players on the HUD.', bedrockMap: { on: 'everyone', off: 'off' } }),
   R('reduced_debug_info', 'Hide coordinates in debug screen', 'Display', { java: 'reduced_debug_info', legacy: 'reducedDebugInfo' }, { desc: 'Reduces the F3 screen so players cannot read their position.' }),
   R('show_death_messages', 'Death messages', 'Display', { java: 'show_death_messages', legacy: 'showDeathMessages', bedrock: 'showDeathMessages' }),
   R('show_advancement_messages', 'Advancement messages', 'Display', { java: 'show_advancement_messages', legacy: 'announceAdvancements' }),
   R('show_tags', 'Show item restriction tags', 'Display', { bedrock: 'showTags' }),
   R('show_recipe_messages', 'Recipe unlock messages', 'Display', { bedrock: 'showRecipeMessages' }),
   R('show_border_effect', 'World border effect', 'Display', { bedrock: 'showBorderEffect' }),
-  R('send_command_feedback', 'Command feedback in chat', 'Display', { java: 'send_command_feedback', legacy: 'sendCommandFeedback', bedrock: 'sendCommandFeedback' }),
+  R('send_command_feedback', 'Command feedback', 'Display', { java: 'send_command_feedback', legacy: 'sendCommandFeedback', bedrock: 'sendCommandFeedback' }, { desc: 'Shows command results. On Bedrock, turning this off also silences the console, so live values here can no longer be read or confirmed.' }),
   // Gameplay
   R('keep_inventory', 'Keep inventory on death', 'Gameplay', { java: 'keep_inventory', legacy: 'keepInventory', bedrock: 'keepInventory' }),
   R('pvp', 'PvP', 'Gameplay', { java: 'pvp', bedrock: 'pvp' }, { desc: 'Players can damage each other.' }),
@@ -94,6 +100,8 @@ export interface WorldState {
   rules: RuleState[];
   readAt: string | null;
   canSave: boolean;
+  /** The server is not answering console queries (Bedrock with sendCommandFeedback off); values shown are the last known ones. */
+  silent: boolean;
 }
 
 const DIFFICULTIES = ['peaceful', 'easy', 'normal', 'hard'];
@@ -180,7 +188,7 @@ export async function getWorld(inst: ServerInstance, force = false): Promise<Wor
   const props = await PropertiesFile.load(path.join(inst.root, 'server.properties'));
   if (!running) {
     cache.delete(inst.id);
-    return { running, edition, difficulty: props.get('difficulty') || null, weather: null, rules: [], readAt: null, canSave: false };
+    return { running, edition, difficulty: props.get('difficulty') || null, weather: null, rules: [], readAt: null, canSave: false, silent: false };
   }
   const c = cache.get(inst.id);
   if (!force && c && Date.now() - c.at < 20_000) return c.state;
@@ -193,6 +201,13 @@ export async function getWorld(inst: ServerInstance, force = false): Promise<Wor
   if (edition === 'bedrock') {
     scheme = 'bedrock';
     const r = await readBedrock(inst);
+    if (!r.values.size) {
+      // No answer at all: command feedback is off, so the console prints nothing. Keep showing the last known values.
+      const last = c?.state;
+      const state: WorldState = { running, edition, difficulty, weather: last?.weather ?? null, rules: last?.rules ?? [], readAt: last?.readAt ?? null, canSave: false, silent: true };
+      cache.set(inst.id, { at: Date.now(), state, scheme: 'bedrock' });
+      return state;
+    }
     weather = r.weather;
     const known = new Set<string>();
     for (const def of RULES) {
@@ -200,11 +215,12 @@ export async function getWorld(inst: ServerInstance, force = false): Promise<Wor
       const v = r.values.get(def.bedrock.toLowerCase());
       if (v === undefined) continue;
       known.add(def.bedrock.toLowerCase());
-      rules.push({ key: def.key, name: def.bedrock, label: def.label, desc: def.desc, group: def.group, type: def.type || 'bool', value: v });
+      const value = def.bedrockMap ? String(v.toLowerCase() !== def.bedrockMap.off) : v;
+      rules.push({ key: def.key, name: def.bedrock, label: def.label, desc: def.desc, group: def.group, type: def.type || 'bool', value });
     }
     // Anything else the server reports is still shown, under Advanced.
     for (const [name, v] of r.values) {
-      if (known.has(name)) continue;
+      if (known.has(name) || BEDROCK_READ_ONLY.has(name)) continue;
       rules.push({ key: name, name, label: name, group: 'Advanced', type: v === 'true' || v === 'false' ? 'bool' : /^-?\d+$/.test(v) ? 'int' : 'text', value: v });
     }
   } else {
@@ -225,7 +241,7 @@ export async function getWorld(inst: ServerInstance, force = false): Promise<Wor
       rules.push({ key: def.key, name, label: def.label, desc: def.desc, group: def.group, type, value: v });
     }
   }
-  const state: WorldState = { running, edition, difficulty, weather, rules, readAt: new Date().toISOString(), canSave: edition === 'java' };
+  const state: WorldState = { running, edition, difficulty, weather, rules, readAt: new Date().toISOString(), canSave: edition === 'java', silent: false };
   cache.set(inst.id, { at: Date.now(), state, scheme });
   return state;
 }
@@ -238,25 +254,35 @@ export type WorldAction =
   | { type: 'say'; message: string }
   | { type: 'save' };
 
-export async function applyWorld(inst: ServerInstance, a: WorldAction): Promise<{ message: string }> {
+export async function applyWorld(inst: ServerInstance, a: WorldAction): Promise<{ message: string; unconfirmed?: boolean }> {
   if (inst.state !== 'running') throw new HttpError(409, 'Start the server to change live settings');
   const bedrock = inst.rec.edition === 'bedrock';
   switch (a.type) {
     case 'gamerule': {
       const name = String(a.name || '');
       if (!/^[A-Za-z_:]{2,64}$/.test(name)) throw bad('Invalid game rule');
-      const value = String(a.value);
+      let value = String(a.value);
       if (!/^(true|false|-?\d{1,9}|[a-z_]{1,32})$/.test(value)) throw bad('Invalid value');
-      const confirmed = inst.waitFor((_ev, line) => new RegExp(`Game ?rule ${name.replace(/^minecraft:/, '')} (is now set to|has been updated to)`, 'i').test(line), 2500).then(() => true).catch(() => false);
-      const rejected = inst.waitFor((_ev, line) => /Incorrect argument|Unknown or incomplete|Syntax error|Unknown command/i.test(line), 1500).then(() => true).catch(() => false);
-      inst.send(`gamerule ${name} ${value}`);
-      const ok = await Promise.race([confirmed, rejected.then((r) => (r ? false : confirmed))]);
-      const c = cache.get(inst.id);
-      if (ok && c) {
-        const rule = c.state.rules.find((r) => r.name.toLowerCase() === name.toLowerCase());
-        if (rule) rule.value = value;
+      const shown = value;
+      if (bedrock) {
+        if (BEDROCK_READ_ONLY.has(name.toLowerCase())) throw new HttpError(409, `Bedrock reports "${name}" but does not allow changing it`);
+        const def = RULES.find((r) => r.bedrock?.toLowerCase() === name.toLowerCase());
+        if (def?.bedrockMap && (value === 'true' || value === 'false')) value = value === 'true' ? def.bedrockMap.on : def.bedrockMap.off;
       }
-      if (!ok) throw new HttpError(409, `The server did not accept "${name} ${value}"`);
+      const confirmed = inst.waitFor((_ev, line) => new RegExp(`Game ?rule ${name.replace(/^minecraft:/, '')} (is now set to|has been updated to)`, 'i').test(line), 2000).then(() => 'ok' as const).catch(() => 'silent' as const);
+      const rejected = inst.waitFor((_ev, line) => /Incorrect argument|Unknown or incomplete|Syntax error|Unknown command|Invalid (bool|integer|value)/i.test(line), 2000).then(() => 'rejected' as const).catch(() => 'silent' as const);
+      inst.send(`gamerule ${name} ${value}`);
+      // First definite answer wins; if the server says nothing (Bedrock with command feedback off) the change is sent but unconfirmed.
+      const first = await Promise.race([confirmed.then((r) => (r === 'ok' ? r : new Promise<'silent'>((res) => setTimeout(() => res('silent'), 50)))), rejected.then((r) => (r === 'rejected' ? r : new Promise<'silent'>((res) => setTimeout(() => res('silent'), 50))))]);
+      if (first === 'rejected') throw new HttpError(409, `The server refused to set ${name} to "${value}". It may list this rule without allowing changes, or the value is not valid for it.`);
+      const c = cache.get(inst.id);
+      if (c) {
+        const rule = c.state.rules.find((r) => r.name.toLowerCase() === name.toLowerCase());
+        if (rule) rule.value = shown;
+        // Turning feedback back on makes the server talk again: force a fresh read next time.
+        if (/^send_?command_?feedback$/i.test(name)) c.at = 0;
+      }
+      if (first === 'silent') return { message: `${name} sent as ${value}; the server gave no confirmation (command feedback is off)`, unconfirmed: true };
       return { message: `${name} set to ${value}` };
     }
     case 'difficulty': {

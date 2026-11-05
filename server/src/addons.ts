@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
-import { downloadTo, exists, fetchJson, parseJsonLoose, readJson, rmrf, safeJoin, writeJson, bad, HttpError } from './util.js';
+import { downloadTo, exists, fetchJson, normalizePerms, parseJsonLoose, readJson, rmrf, safeJoin, writeJson, bad, HttpError } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
 import type { ServerType } from './servers/types.js';
@@ -211,13 +211,16 @@ async function readPackDir(inst: ServerInstance, kind: 'behavior' | 'resource', 
   return out;
 }
 
+/** Packs that ship inside the Bedrock server download; hidden unless a world has them switched on. */
+const BUILT_IN_PACK = /^(vanilla|chemistry|experimental|editor$|server_editor_library$|server_library$|server_ui_library$|test_vanilla)/i;
+
 export async function listPacks(inst: ServerInstance): Promise<BedrockPack[]> {
   const bp = await readJson<{ pack_id: string }[]>(worldPacksFile(inst, 'behavior'), []);
   const rp = await readJson<{ pack_id: string }[]>(worldPacksFile(inst, 'resource'), []);
   return [
     ...(await readPackDir(inst, 'behavior', new Set(bp.map((x) => x.pack_id)))),
     ...(await readPackDir(inst, 'resource', new Set(rp.map((x) => x.pack_id)))),
-  ].filter((p) => !/^(vanilla|chemistry|experimental)/i.test(p.folder) || p.active);
+  ].filter((p) => !BUILT_IN_PACK.test(p.folder) || p.active);
 }
 
 async function setPackActive(inst: ServerInstance, kind: 'behavior' | 'resource', uuid: string, version: number[], active: boolean) {
@@ -279,6 +282,7 @@ export async function installPackArchive(inst: ServerInstance, fileName: string,
       await rmrf(dest);
       await fsp.mkdir(path.dirname(dest), { recursive: true });
       await fsp.cp(pd, dest, { recursive: true });
+      await normalizePerms(dest);
       await setPackActive(inst, kind, m.header.uuid, m.header.version || [1, 0, 0], true);
       installed.push(`${safeName} (${kind})`);
     }

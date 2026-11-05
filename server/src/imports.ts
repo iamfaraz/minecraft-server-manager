@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
 import { config } from './config.js';
-import { dirSize, exists, readJson, rmrf, run, slugify, uid, which, writeJson, bad, notFound, HttpError } from './util.js';
+import { dirSize, exists, normalizePerms, readJson, rmrf, run, slugify, uid, which, writeJson, bad, notFound, HttpError } from './util.js';
 import type { Edition } from './servers/types.js';
 
 /**
@@ -122,6 +122,7 @@ async function finalise(id: string, name: string, det: DetectedWorld, source: Wo
   if (det.nether) await move(det.nether, 'world_nether');
   if (det.end) await move(det.end, 'world_the_end');
   if (stagingToRemove) await rmrf(stagingToRemove);
+  await normalizePerms(dir);
   const meta: WorldImport = {
     id,
     name: name.trim() || det.levelName,

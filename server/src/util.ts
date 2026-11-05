@@ -71,6 +71,29 @@ export async function rmrf(p: string): Promise<void> {
   await fsp.rm(p, { recursive: true, force: true });
 }
 
+/**
+ * Give a freshly installed tree ordinary permissions (dirs 755, files 644). Content extracted through a
+ * mkdtemp() staging folder otherwise keeps that folder's owner-only 0700 mode.
+ */
+export async function normalizePerms(root: string): Promise<void> {
+  const stack = [root];
+  while (stack.length) {
+    const d = stack.pop()!;
+    await fsp.chmod(d, 0o755).catch(() => {});
+    let entries: fs.Dirent[];
+    try {
+      entries = await fsp.readdir(d, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else if (e.isFile()) await fsp.chmod(full, 0o644).catch(() => {});
+    }
+  }
+}
+
 export async function dirSize(dir: string): Promise<number> {
   let total = 0;
   const stack = [dir];
