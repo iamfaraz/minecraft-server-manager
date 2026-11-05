@@ -156,9 +156,19 @@ export class ServerInstance extends EventEmitter {
           s.once('error', () => res(false));
           s.bind(port, () => s.close(() => res(true)));
         } else {
-          const s = net.createServer();
-          s.once('error', () => res(false));
-          s.listen(port, () => s.close(() => res(true)));
+          // Probe by connecting rather than listening: after a server stops, its accepted connections sit in
+          // TIME_WAIT for a minute and make a listen() test report EADDRINUSE even though the port is free.
+          const c = new net.Socket();
+          let done = false;
+          const finish = (isFree: boolean) => {
+            if (done) return;
+            done = true;
+            c.destroy();
+            res(isFree);
+          };
+          c.setTimeout(700, () => finish(true));
+          c.once('error', () => finish(true));
+          c.connect(port, '127.0.0.1', () => finish(false));
         }
       });
       if (!free) throw new HttpError(409, `Port ${port}/${udp ? 'udp' : 'tcp'} is already in use`);

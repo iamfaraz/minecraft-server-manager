@@ -330,6 +330,7 @@ export class ServerManager {
     if (rec.edition === 'bedrock' && patch.transport !== undefined && patch.transport !== rec.transport) {
       if (!['raknet', 'nethernet'].includes(patch.transport)) throw bad('transport must be raknet or nethernet');
       rec.transport = patch.transport;
+      if (patch.transport !== 'nethernet' && rec.broadcast?.enabled) rec.broadcast = { enabled: false }; // console broadcast needs NetherNet
       needsRestart.push('transport');
     }
     if (rec.edition === 'java' && patch.java) {

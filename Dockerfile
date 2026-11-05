@@ -58,6 +58,12 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo amd64) \
          && chmod +x /usr/local/bin/playit ) \
     || echo "WARNING: playit download failed; it will be fetched at runtime when enabled"
 
+# MCXboxBroadcast (GPL-3.0, run as a separate process) lets console players join via the Xbox Live Friends tab
+ARG MCXB_VERSION=162
+RUN mkdir -p /opt/mcxboxbroadcast \
+    && ( curl -fsSL -o /opt/mcxboxbroadcast/MCXboxBroadcastStandalone.jar "https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar" ) \
+    || echo "WARNING: MCXboxBroadcast download failed; it will be fetched at runtime when enabled"
+
 WORKDIR /app
 COPY --from=server /app/server/dist ./server/dist
 COPY --from=server /app/server/node_modules ./server/node_modules
@@ -70,6 +76,7 @@ ENV MCSM_DATA_DIR=/data \
     MCSM_IN_DOCKER=1 \
     MCSM_PORT=8080 \
     MCSM_VERSION=${MCSM_VERSION} \
+    MCSM_MCXB_VERSION=${MCXB_VERSION} \
     HOME=/data/.home \
     PUID=1000 \
     PGID=1000 \

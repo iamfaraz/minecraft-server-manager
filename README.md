@@ -14,6 +14,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - **Cross-play:** one toggle installs Geyser + Floodgate on Paper/Purpur/Fabric/NeoForge servers so Bedrock players can join Java servers.
 - **Remote play without port forwarding:** built-in [playit.gg](https://playit.gg) agent. Enable it, claim it once in your browser, then create a tunnel per server from the UI to get a public address.
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
+- **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
 - **Bedrock transport choice:** RakNet (classic, pingable, tunnel-friendly) or NetherNet (Mojang's new WebRTC transport, the BDS default) per server.
 - Runs as your host user (`PUID`/`PGID`), so `./data` stays yours.
 
@@ -75,6 +76,18 @@ The manager writes `transport`, `server-port`, `server-portv6`, `server-udp-port
 - **Advertised IP (bridge mode).** `deploy.sh` stores your LAN IP as `MCSM_ADVERTISE_IP`; the manager then writes `server-udp-ports=<ip>:<port>:<port>` for NetherNet servers. Override per server under Settings → *Advertised IP for NetherNet*. The value `public` resolves your current public IP on every start (for port-forwarded servers with a dynamic IP).
 
 LAN discovery in bridge mode never works (broadcasts don't cross the Docker bridge); players must use *Add Server* with the host IP and port.
+
+### Console players (Switch, Xbox, PlayStation)
+
+Consoles can't type in a server address. Under a Bedrock server's **Settings → Console players**, turn on *Show this server in the Xbox Live Friends tab*:
+
+1. The server is switched to NetherNet if needed (restart it once).
+2. When the server is running, a sign-in box appears: open `microsoft.com/link`, enter the code, and sign in with a **spare** Microsoft account (the broadcaster emulates parts of a game client, so don't use your main one).
+3. On the console, add that account's gamertag as a friend. Requests are accepted automatically and the server shows up under Play → Friends. Switch needs a linked Microsoft account and Nintendo Switch Online.
+
+How it works: MCXboxBroadcast holds an Xbox Live session for that account and relays each join to the server's NetherNet signaling on `127.0.0.1:<port>`; the console then connects directly to the address the server advertises (`MCSM_ADVERTISE_IP`, or the host itself with host networking). LAN consoles work out of the box. Remote consoles additionally need the server's UDP port reachable from the internet and the advertised IP set to `public`.
+
+Already running the standalone container? Stop it and reuse its login: copy `config/cache/` (and optionally `config.yml`, `screenshot.jpg`) into `data/servers/<id>/broadcaster/` before enabling the toggle. The address and port in `config.yml` are rewritten automatically. The jar version is pinned (`MCXB_VERSION` build arg / `MCSM_MCXB_VERSION` env) because each release targets a specific Bedrock protocol version.
 
 ### Apple Silicon and other ARM hosts
 

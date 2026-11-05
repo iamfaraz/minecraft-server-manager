@@ -7,6 +7,7 @@ import { fmtMb } from '../../lib/format';
 import type { ServerSummary, SystemInfo } from '../../lib/types';
 import { Card, ConfirmModal, Field, Segmented, Spinner, Toggle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { ConsoleBroadcast } from './ConsoleBroadcast';
 
 const JAVA_COMMON = ['motd', 'max-players', 'gamemode', 'difficulty', 'pvp', 'online-mode', 'white-list', 'enforce-whitelist', 'view-distance', 'simulation-distance', 'spawn-protection', 'allow-flight', 'allow-nether', 'hardcore', 'level-seed', 'level-type', 'enable-command-block', 'max-world-size', 'player-idle-timeout', 'force-gamemode', 'resource-pack'];
 const BEDROCK_COMMON = ['server-name', 'gamemode', 'force-gamemode', 'difficulty', 'allow-cheats', 'max-players', 'online-mode', 'allow-list', 'server-udp-ports', 'enable-lan-visibility', 'view-distance', 'tick-distance', 'player-idle-timeout', 'max-threads', 'level-seed', 'default-player-permission-level', 'texturepack-required', 'content-log-file-enabled', 'server-authoritative-movement', 'emit-server-telemetry'];
@@ -133,6 +134,8 @@ export function Settings({ s }: { s: ServerSummary }) {
             <Toggle checked={form.restartOnCrash} onChange={(v) => setForm({ ...form, restartOnCrash: v })} label="Restart on crash" description="Up to 3 restarts within 10 minutes." />
           </div>
         </Card>
+
+        {!java && <ConsoleBroadcast s={s} />}
 
         {java && (
           <Card title="Java runtime">

@@ -96,6 +96,7 @@ export function Overview({ s }: { s: ServerSummary }) {
             {s.build?.loaderVersion && <Item label="Loader" value={s.build.loaderVersion} />}
             <Item label="Port" value={s.edition === 'bedrock' ? (s.transport === 'nethernet' ? `${s.port} UDP + TCP` : `${s.port} / ${s.portV6} UDP`) : `${s.port} TCP`} />
             {s.edition === 'bedrock' && <Item label="Transport" value={s.transport === 'nethernet' ? 'NetherNet (WebRTC)' : 'RakNet'} />}
+            {s.edition === 'bedrock' && <Item label="Console broadcast" value={s.broadcast?.enabled ? 'On (Xbox Live)' : 'Off'} />}
             {s.ping?.motd && <Item label="MOTD" value={s.ping.motd} />}
             {s.ping?.version && <Item label="Reported version" value={s.ping.version} icon={Gauge} />}
             <Item label="Auto start" value={s.autoStart ? 'On' : 'Off'} />

@@ -10,6 +10,7 @@ import { loadAppConfig } from './store.js';
 import { HttpError } from './util.js';
 import { manager } from './servers/manager.js';
 import { playit } from './playit.js';
+import { broadcaster } from './broadcaster.js';
 import { authRoutes } from './routes/auth.js';
 import { serverRoutes } from './routes/servers.js';
 import { miscRoutes } from './routes/misc.js';
@@ -51,6 +52,7 @@ async function main() {
   }
 
   await manager.init();
+  broadcaster.init((id) => manager.instances.get(id), () => [...manager.instances.values()]);
   await playit.init();
 
   await app.listen({ port: config.port, host: config.host, listenTextResolver: (addr) => `listening on ${addr}` });
@@ -63,6 +65,7 @@ async function main() {
     app.log.info(`${sig} received; stopping servers gracefully`);
     const force = setTimeout(() => process.exit(1), config.stopTimeoutMs + 30_000);
     try {
+      await broadcaster.shutdown();
       await manager.shutdown();
       await playit.stop();
       await app.close();

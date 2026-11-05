@@ -47,6 +47,8 @@ export interface ServerRecord {
   transport?: BedrockTransport;
   /** Overrides MCSM_ADVERTISE_IP for this server's NetherNet WebRTC candidates. */
   advertiseIp?: string;
+  /** Xbox Live broadcast (MCXboxBroadcast) so console players can join from the Friends tab. */
+  broadcast?: { enabled: boolean };
   levelName: string;
   java?: JavaSettings;
   autoStart: boolean;

@@ -71,6 +71,7 @@ export interface ServerSummary {
   portV6?: number;
   transport?: 'raknet' | 'nethernet';
   advertiseIp?: string;
+  broadcast?: { enabled: boolean };
   levelName: string;
   java?: JavaSettings;
   autoStart: boolean;
@@ -159,5 +160,6 @@ export type WsEvent =
   | { type: 'server.changed'; id?: string }
   | { type: 'playit'; status: PlayitStatus }
   | { type: 'backup.changed'; id: string }
+  | { type: 'broadcast'; id: string; status: any }
   | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
   | { type: 'pong' };

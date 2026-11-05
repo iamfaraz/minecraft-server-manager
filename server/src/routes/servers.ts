@@ -5,6 +5,7 @@ import { manager } from '../servers/manager.js';
 import { bad, PropertiesFile } from '../util.js';
 import type { CreateServerInput, ServerRecord, ServerType } from '../servers/types.js';
 import { playit } from '../playit.js';
+import { broadcaster } from '../broadcaster.js';
 
 export async function serverRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
@@ -97,6 +98,27 @@ export async function serverRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/servers/:id/reinstall', async (req) => {
     await manager.reinstall(req.params.id);
     return { ok: true };
+  });
+
+  /* ---------------- Console broadcast (Xbox Live) ---------------- */
+  app.get<{ Params: { id: string } }>('/api/servers/:id/broadcast', async (req) => broadcaster.status(manager.get(req.params.id)));
+  app.post<{ Params: { id: string }; Body: { enabled: boolean; switchTransport?: boolean } }>('/api/servers/:id/broadcast', async (req) => {
+    const inst = manager.get(req.params.id);
+    if (req.body?.enabled && req.body?.switchTransport && inst.rec.edition === 'bedrock' && inst.rec.transport !== 'nethernet') {
+      await manager.updateSettings(inst.id, { transport: 'nethernet' });
+    }
+    await broadcaster.setEnabled(inst, !!req.body?.enabled);
+    return broadcaster.status(inst);
+  });
+  app.post<{ Params: { id: string } }>('/api/servers/:id/broadcast/restart', async (req) => {
+    const inst = manager.get(req.params.id);
+    await broadcaster.restart(inst);
+    return broadcaster.status(inst);
+  });
+  app.post<{ Params: { id: string } }>('/api/servers/:id/broadcast/signout', async (req) => {
+    const inst = manager.get(req.params.id);
+    await broadcaster.signOut(inst);
+    return broadcaster.status(inst);
   });
 
   app.post<{ Params: { id: string }; Body: { kind?: 'game' | 'geyser' } }>('/api/servers/:id/tunnel', async (req) => {
