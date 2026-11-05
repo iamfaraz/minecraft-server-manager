@@ -89,6 +89,18 @@ env_set PUID "$PUID"
 env_set PGID "$PGID"
 ok "Running servers as uid=$PUID gid=$PGID"
 
+# Timezone: follow the host unless .env already names one other than the UTC placeholder.
+detect_tz() {
+  local z=""
+  if command -v timedatectl >/dev/null 2>&1; then z="$(timedatectl show -p Timezone --value 2>/dev/null || true)"; fi
+  if [ -z "$z" ] && [ -f /etc/timezone ]; then z="$(head -1 /etc/timezone)"; fi
+  if [ -z "$z" ] && [ -L /etc/localtime ]; then z="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"; fi
+  printf '%s' "${z:-UTC}"
+}
+CUR_TZ="$(env_get TZ)"
+if [ -z "$CUR_TZ" ] || [ "$CUR_TZ" = "UTC" ]; then env_set TZ "$(detect_tz)"; fi
+ok "Timezone: $(env_get TZ)"
+
 # Web port
 WEB_PORT="${FORCE_PORT:-$(env_get MCSM_WEB_PORT)}"
 WEB_PORT="${WEB_PORT:-$DEFAULT_WEB_PORT}"

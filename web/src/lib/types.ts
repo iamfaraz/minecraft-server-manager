@@ -108,6 +108,8 @@ export interface SystemInfo {
   javaRuntimes: { major: number; path: string; source: string; version?: string }[];
   bedrock: { supported: boolean; emulated: boolean; reason?: string };
   uptimeSec: number;
+  timezone?: string;
+  now?: string;
 }
 
 export interface BackupMeta {

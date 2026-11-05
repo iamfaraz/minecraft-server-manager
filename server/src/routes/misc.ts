@@ -45,6 +45,8 @@ export async function miscRoutes(app: FastifyInstance) {
       javaRuntimes: runtimes,
       bedrock,
       uptimeSec: Math.round(process.uptime()),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      now: new Date().toString(),
     };
   });
 

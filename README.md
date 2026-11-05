@@ -57,6 +57,10 @@ printf 'PUID=%s\nPGID=%s\n' "$(id -u)" "$(id -g)" >> .env
 docker compose up -d
 ```
 
+### Timezone
+
+Server logs, the console and scheduled backups use the container's timezone. `deploy.sh` copies the host's zone into `.env` as `TZ` (for example `TZ=Asia/Karachi`); change it there and run `docker compose up -d` to apply. The System page shows the zone in effect.
+
 ### Memory
 
 `mem_limit` in `docker-compose.yml` (default `12g`, sized for a 16 GB host) caps the whole container. Each Java server's `-Xmx` is set in its settings; keep 1–2 GB of headroom per JVM, plus ~1 GB for each Bedrock server. The System page shows the running total against the limit and warns when you are close to the OOM killer.

@@ -144,6 +144,8 @@ export function System() {
             <dd className="text-right font-mono">{s.cpu.load1.toFixed(2)}</dd>
             <dt className="text-muted">Bedrock support</dt>
             <dd className="text-right">{s.bedrock.supported ? (s.bedrock.emulated ? 'Yes (box64 emulation)' : 'Yes (native x86_64)') : <span className="text-amber-300">No</span>}</dd>
+            <dt className="text-muted">Timezone</dt>
+            <dd className="text-right font-mono text-xs" title={s.now}>{s.timezone || 'UTC'}</dd>
             <dt className="text-muted">Data directory</dt>
             <dd className="truncate text-right font-mono text-xs" title={s.dataDir}>{s.dataDir}</dd>
           </dl>

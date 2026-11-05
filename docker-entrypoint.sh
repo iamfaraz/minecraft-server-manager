@@ -6,6 +6,13 @@ PGID="${PGID:-1000}"
 export HOME="${HOME:-/data/.home}"
 
 if [ "$(id -u)" = "0" ]; then
+  # Local time for the manager and every server process (log timestamps, scheduled backups).
+  if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
+    echo "[entrypoint] timezone $TZ"
+  elif [ -n "${TZ:-}" ]; then
+    echo "[entrypoint] unknown timezone '$TZ', staying on UTC"; unset TZ
+  fi
   if ! getent group "$PGID" >/dev/null 2>&1; then groupadd -o -g "$PGID" blockhost; fi
   if ! getent passwd "$PUID" >/dev/null 2>&1; then useradd -o -M -u "$PUID" -g "$PGID" -d "$HOME" -s /bin/sh blockhost; fi
   mkdir -p /data "$HOME"
