@@ -1,46 +1,15 @@
 // Turns what a player is wearing and carrying into the HUD payload. No Minecraft imports here, so it can be tested
 // outside the game (see ../../../test.mjs).
 import { EMPTY_ICON, ICON_W, PAD, PREFIX, SLOTS, TEXT_CHARS } from './layout.js';
-import { BLOCK_TEXTURES, ITEM_TEXTURES } from './textures.js';
+import { ICONS } from './icons.js';
 
-/** Item ids whose sprite file is not simply the id (or the id with golden_/wooden_ shortened). */
-const SPRITE_ALIASES = {
-  totem_of_undying: 'totem',
-  bow: 'bow_standby',
-  crossbow: 'crossbow_standby',
-  fishing_rod: 'fishing_rod_uncast',
-  firework_rocket: 'fireworks',
-  golden_apple: 'apple_golden',
-  enchanted_golden_apple: 'apple_golden',
-  filled_map: 'map_filled',
-  empty_map: 'map_empty',
-  nautilus_shell: 'nautilus',
-  bucket: 'bucket_empty',
-  water_bucket: 'bucket_water',
-  lava_bucket: 'bucket_lava',
-  milk_bucket: 'bucket_milk',
-  powder_snow_bucket: 'bucket_powder_snow',
-  compass: 'compass_item',
-  clock: 'clock_item',
-  torch: 'blocks/torch_on',
-  shield: 'ui/empty_armor_slot_shield', // shields are 3D models with no sprite; the slot outline stands in
-};
-
-/** Used when an item has no texture we can name (most blocks with several faces, items from other add-ons). */
-const UNKNOWN_ICON = 'ui/inventory_icon';
+/** Shown for anything the table has no texture for: items from other add-ons and a few 3D-only vanilla items. */
+const UNKNOWN_ICON = 'ui/missing_item';
 const ARROW_ICON = 'items/arrow';
 
 /** Texture path below `textures/` for an item id such as `minecraft:diamond_sword`. */
 export function iconFor(typeId) {
-  if (!typeId.startsWith('minecraft:')) return UNKNOWN_ICON;
-  const id = typeId.slice('minecraft:'.length);
-  const alias = SPRITE_ALIASES[id];
-  if (alias) return alias.includes('/') ? alias : `items/${alias}`;
-  for (const name of [id, id.replace(/^golden_/, 'gold_'), id.replace(/^wooden_/, 'wood_')]) {
-    if (ITEM_TEXTURES.has(name)) return `items/${name}`;
-  }
-  if (BLOCK_TEXTURES.has(id)) return `blocks/${id}`;
-  return UNKNOWN_ICON;
+  return (typeId.startsWith('minecraft:') && ICONS[typeId.slice('minecraft:'.length)]) || UNKNOWN_ICON;
 }
 
 /** Remaining durability in percent. Never 100 once damaged, never 0 while the item still works. */

@@ -143,7 +143,7 @@ Durability is a percentage coloured from green down to red. Empty slots show not
 **Good to know**
 
 - The HUD travels over the title channel, so an ordinary title (from `/title` or another add-on) disappears early if the HUD updates while it is showing.
-- Blocks with several different faces and items from other add-ons show a generic icon; shields show the slot outline. Leather armour is drawn undyed.
+- Icons come from a table generated from Mojang's own block and item data (`generate-icons.mjs`), covering 1,616 of the 1,627 vanilla items. Blocks are drawn as one flat face rather than the 3D cube in the hotbar. Mob heads, banners, a few items with no texture file, and items from other add-ons show a question mark; shields show the slot outline. Leather armour is drawn undyed, and potions show the plain bottle.
 - On touch screens the right column sits just past the hotbar's "..." button.
 
 **Updating the add-on:** upload the new `.mcaddon` over the old one and restart. Each release has a higher pack version, which is what makes players' devices download the new resource pack instead of using their cached copy.
@@ -151,6 +151,7 @@ Durability is a percentage coloured from green down to red. Empty slots show not
 **Change or rebuild:** the sources are in `addons/armor-hud/src`. The HUD layout is generated, so positions and sizes are the constants at the top of `build.mjs`.
 
 ```bash
+node addons/armor-hud/generate-icons.mjs --refresh   # only after a game update: rebuilds the icon table from Mojang's data
 node addons/armor-hud/build.mjs   # writes the .mcaddon (needs the zip command)
 node addons/armor-hud/test.mjs    # checks the script logic and the generated HUD expressions
 ```

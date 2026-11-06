@@ -11,7 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPayload, describe, durabilityPercent, iconFor } from './src/behavior/scripts/hud.js';
-import { PREFIX, SLOTS, SLOT_W } from './src/behavior/scripts/layout.js';
+import { ICON_W, PREFIX, SLOTS, SLOT_W } from './src/behavior/scripts/layout.js';
+import { ICONS, LONGEST_ICON } from './src/behavior/scripts/icons.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hud = JSON.parse(fs.readFileSync(path.join(here, 'build', 'BlockhostArmorHUD_RP', 'ui', 'hud_screen.json'), 'utf8'));
@@ -125,9 +126,26 @@ assert.equal(iconFor('minecraft:leather_boots'), 'items/leather_boots');
 assert.equal(iconFor('minecraft:totem_of_undying'), 'items/totem');
 assert.equal(iconFor('minecraft:bow'), 'items/bow_standby');
 assert.equal(iconFor('minecraft:elytra'), 'items/elytra');
-assert.equal(iconFor('minecraft:cobblestone'), 'blocks/cobblestone');
 assert.equal(iconFor('minecraft:shield'), 'ui/empty_armor_slot_shield');
-assert.equal(iconFor('someaddon:laser'), 'ui/inventory_icon');
+// names that differ between the item id and its texture
+assert.equal(iconFor('minecraft:cooked_chicken'), 'items/chicken_cooked');
+assert.equal(iconFor('minecraft:chicken'), 'items/chicken_raw');
+assert.equal(iconFor('minecraft:cod'), 'items/fish_raw');
+assert.equal(iconFor('minecraft:red_dye'), 'items/dye_powder_red');
+assert.equal(iconFor('minecraft:allay_spawn_egg'), 'items/spawn_eggs/spawn_egg_allay');
+// blocks come from Mojang's block table
+assert.equal(iconFor('minecraft:cobblestone'), 'blocks/cobblestone');
+assert.equal(iconFor('minecraft:oak_log'), 'blocks/log_oak');
+assert.equal(iconFor('minecraft:oak_planks'), 'blocks/planks_oak');
+assert.equal(iconFor('minecraft:spruce_planks'), 'blocks/planks_spruce');
+assert.equal(iconFor('minecraft:crafting_table'), 'blocks/crafting_table_front');
+// no usable texture: the generic icon
+assert.equal(iconFor('minecraft:player_head'), 'ui/missing_item');
+assert.equal(iconFor('someaddon:laser'), 'ui/missing_item');
+// every path fits its field and uses only characters the wire format allows
+assert.ok(LONGEST_ICON <= ICON_W, `longest icon path (${LONGEST_ICON}) must fit the ${ICON_W}-byte field`);
+for (const [id, icon] of Object.entries(ICONS)) assert.ok(/^[A-Za-z0-9_/]+$/.test(icon) && icon.length <= ICON_W, `${id}: ${icon}`);
+assert.ok(Object.keys(ICONS).length > 1500);
 assert.equal(durabilityPercent(0, 1561), 100);
 assert.equal(durabilityPercent(1, 1561), 99);
 assert.equal(durabilityPercent(1560, 1561), 1);
@@ -155,6 +173,7 @@ assert.deepEqual(entries.head, { icon: 'items/iron_helmet', text: '39%', color: 
 assert.deepEqual(entries.legs, { icon: 'items/diamond_leggings', text: '79%', color: 'b' });
 assert.deepEqual(entries.feet, { icon: 'items/leather_boots', text: '0%', color: 'c' });
 assert.deepEqual(entries.offhand, { icon: 'items/totem', text: '5', color: 'f' });
+assert.deepEqual(describe(builder).mainhand, { icon: 'blocks/cobblestone', text: '2304', color: 'f' });
 assert.deepEqual(entries.arrows, { icon: 'items/arrow', text: '144', color: 'f' });
 assert.equal(describe(naked).arrows, null);
 
