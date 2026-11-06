@@ -22,6 +22,8 @@ export const config = {
   host: process.env.MCSM_HOST || '0.0.0.0',
   dataDir,
   serversDir: path.join(dataDir, 'servers'),
+  /** Add-ons that ship with Blockhost (the Bedrock inventory bridge). */
+  addonsDir: process.env.MCSM_ADDONS_DIR || path.resolve(here, '..', '..', 'addons'),
   runtimesDir: path.join(dataDir, 'runtimes'),
   cacheDir: path.join(dataDir, 'cache'),
   playitDir: path.join(dataDir, 'playit'),

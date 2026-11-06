@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { Ban, Crown, Search, ShieldCheck, UserPlus, UserX, Users } from 'lucide-react';
+import { Backpack, Ban, Crown, Search, ShieldCheck, UserPlus, UserX, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { timeAgo } from '../../lib/format';
@@ -8,6 +8,8 @@ import type { ServerSummary, WsEvent } from '../../lib/types';
 import { useWsEvent } from '../../lib/ws';
 import { Card, EmptyState, MiniSwitch, Spinner, Toggle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { PlayerHead } from '../../components/PlayerSkin';
+import { InventoryModal } from './Inventory';
 
 interface RosterEntry {
   name: string;
@@ -56,6 +58,7 @@ export function Players({ s }: { s: ServerSummary }) {
   });
   const [name, setName] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [inventoryOf, setInventoryOf] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const v = q.data;
@@ -168,7 +171,7 @@ export function Players({ s }: { s: ServerSummary }) {
                     <td className="px-5 py-2.5">
                       <div className="flex items-center gap-3">
                         <span className={clsx('size-2 shrink-0 rounded-full', p.online ? 'bg-emerald-400 dot-live' : 'bg-slate-600')} />
-                        {java ? <img src={`https://mc-heads.net/avatar/${encodeURIComponent(p.name)}/28`} className="size-7 rounded-md" alt="" loading="lazy" /> : <div className="flex size-7 items-center justify-center rounded-md bg-sky-500/15 text-xs font-semibold text-sky-300">{p.name.slice(0, 1).toUpperCase()}</div>}
+                        <PlayerHead serverId={s.id} player={p.name} size={28} />
                         <div className="min-w-0">
                           <p className={clsx('truncate font-medium', p.blocked && 'text-rose-200 line-through decoration-rose-400/50')}>{p.name}</p>
                           <p className="truncate font-mono text-[11px] text-muted">{p.id || (java ? 'UUID resolved when added' : 'Xbox ID unknown until they join')}</p>
@@ -206,6 +209,9 @@ export function Players({ s }: { s: ServerSummary }) {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
+                        <button className="btn-ghost btn-sm" title="View and edit inventory and experience" onClick={() => setInventoryOf(p.name)}>
+                          <Backpack className="size-3.5" /> Inventory
+                        </button>
                         {p.online && (
                           <button className="btn-ghost btn-sm" title="Kick" disabled={act.isPending} onClick={() => act.mutate({ action: 'kick', name: p.name, reason: 'Kicked by an operator' })}>
                             <UserX className="size-3.5" /> Kick
@@ -241,6 +247,7 @@ export function Players({ s }: { s: ServerSummary }) {
             : 'Bedrock has no ban command, so Blockhost keeps the blocklist itself and removes blocked players the moment they join. Visitors can look but not build; members play normally; operators can run commands.'}
         </p>
       </Card>
+      {inventoryOf && <InventoryModal s={s} player={inventoryOf} onClose={() => setInventoryOf(null)} />}
     </div>
   );
 }

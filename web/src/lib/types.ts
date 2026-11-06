@@ -214,3 +214,45 @@ export interface PortConflictError {
 }
 
 export type StartResolve = { mode: 'stop-others' } | { mode: 'auto' } | { mode: 'custom'; port?: number; geyserPort?: number };
+
+/* ---- inventories ---- */
+export interface InvItem {
+  id: string;
+  count: number;
+  maxCount?: number;
+  damage?: number;
+  maxDamage?: number;
+  name?: string;
+  enchants?: { id: string; level: number }[];
+  /** Carries data beyond what is listed (lore, contents...). */
+  extra?: boolean;
+}
+export type WornSlot = 'head' | 'chest' | 'legs' | 'feet' | 'offhand';
+/** 0-8 is the hotbar, 9-35 the rest of the inventory; names are the worn slots. */
+export type SlotRef = number | WornSlot;
+
+export interface PlayerInventory {
+  player: string;
+  online: boolean;
+  /** live: from the running server. file: the saved player file (Java, offline). snapshot: as last seen (Bedrock, offline). */
+  source: 'live' | 'file' | 'snapshot';
+  at: string;
+  slots: (InvItem | null)[];
+  equipment: Record<WornSlot, InvItem | null>;
+  xp: { level: number; progress: number };
+  /** Changes waiting for the player to join. */
+  pending?: number;
+  note?: string;
+}
+
+export interface InventoryStatus {
+  edition: Edition;
+  /** Bedrock only: the helper script inside the server. */
+  bridge: { installed: boolean; ready: boolean; outdated: boolean; running: boolean } | null;
+}
+
+export interface CatalogueItem {
+  id: string;
+  name: string;
+  icon: boolean;
+}

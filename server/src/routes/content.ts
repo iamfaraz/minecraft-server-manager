@@ -1,3 +1,5 @@
+import * as assets from '../inventory/assets.js';
+import * as inventory from '../inventory/index.js';
 import type { FastifyInstance } from 'fastify';
 import { requireAuth } from '../auth.js';
 import { manager } from '../servers/manager.js';
@@ -71,6 +73,22 @@ export async function contentRoutes(app: FastifyInstance) {
     reply.header('Content-Disposition', `attachment; filename="${req.params.bid}.tar.gz"`);
     return reply.send(fs.createReadStream(f));
   });
+
+  /* ---------------- Inventories ---------------- */
+  app.get('/api/items', async () => ({ items: assets.itemCatalogue() }));
+  app.get<{ Params: { id: string } }>('/api/icons/:id', async (req, reply) => {
+    const png = await assets.itemIcon(req.params.id.replace(/\.png$/, ''));
+    if (!png) return reply.code(404).send({ error: 'No icon' });
+    return reply.header('Content-Type', 'image/png').header('Cache-Control', 'private, max-age=604800').send(png);
+  });
+  app.get<{ Params: { id: string; player: string } }>('/api/servers/:id/players/:player/skin', async (req) => ({ url: await assets.playerSkin(manager.get(req.params.id), req.params.player) }));
+  app.get<{ Params: { id: string } }>('/api/servers/:id/inventory', async (req) => inventory.inventoryStatus(manager.get(req.params.id)));
+  app.post<{ Params: { id: string } }>('/api/servers/:id/inventory/bridge', async (req) => inventory.installBridge(manager.get(req.params.id)));
+  app.get<{ Params: { id: string; player: string } }>('/api/servers/:id/inventory/:player', async (req) => inventory.getInventory(manager.get(req.params.id), req.params.player));
+  app.post<{ Params: { id: string; player: string }; Body: unknown }>('/api/servers/:id/inventory/:player', async (req) =>
+    inventory.applyInventoryOp(manager.get(req.params.id), req.params.player, req.body),
+  );
+  app.delete<{ Params: { id: string; player: string } }>('/api/servers/:id/inventory/:player/pending', async (req) => inventory.clearPending(manager.get(req.params.id), req.params.player));
 
   /* ---------------- Addons ---------------- */
   app.get<{ Params: { id: string } }>('/api/servers/:id/addons', async (req) => {

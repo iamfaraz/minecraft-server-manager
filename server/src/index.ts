@@ -10,6 +10,7 @@ import { loadAppConfig } from './store.js';
 import { HttpError } from './util.js';
 import { manager } from './servers/manager.js';
 import { playit } from './playit.js';
+import { init as initInventory } from './inventory/index.js';
 import { broadcaster } from './broadcaster.js';
 import { authRoutes } from './routes/auth.js';
 import { serverRoutes } from './routes/servers.js';
@@ -53,6 +54,7 @@ async function main() {
 
   await manager.init();
   broadcaster.init((id) => manager.instances.get(id), () => [...manager.instances.values()]);
+  initInventory((id) => manager.instances.get(id));
   await playit.init();
 
   await app.listen({ port: config.port, host: config.host, listenTextResolver: (addr) => `listening on ${addr}` });

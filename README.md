@@ -20,6 +20,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
 - **Armor HUD add-on for Bedrock:** held items, armour durability, arrows and free slots around the hotbar, for every Bedrock client. See *Bedrock add-on: Armor HUD* below.
+- **Inventory editor:** view and change any player's inventory and experience level, online or offline, on Java and Bedrock, in a screen laid out like Minecraft's own. See *Player inventories and experience* below.
 - **Port manager:** one page showing which server holds or uses every port, with assign, share and release, and a prompt on Start when a port is taken. See *Ports* below.
 - **Bedrock transport choice:** NetherNet (Mojang's WebRTC transport, required by current Bedrock versions) or RakNet (the classic protocol, for older versions) per server.
 - Runs as your host user (`PUID`/`PGID`), so `./data` stays yours.
@@ -169,6 +170,30 @@ node addons/armor-hud/generate-icons.mjs --refresh   # only after a game update:
 node addons/armor-hud/build.mjs   # writes the .mcaddon (needs the zip command)
 node addons/armor-hud/test.mjs    # checks the script logic and the generated HUD expressions
 ```
+
+## Player inventories and experience
+
+On a server's **Players** page, every player has an **Inventory** button. It opens an editor laid out like Minecraft's own inventory screen, with the player's skin, armour, off hand, the 27 inventory slots and the hotbar. From there you can:
+
+- give items (search the item list, or type any id for items from mods and add-ons),
+- put an item in a specific slot, change a stack's count, or remove it,
+- set the experience level.
+
+It works for players who are online and for players who are not, on both editions. Everything is done by the manager; nothing is installed on players' devices.
+
+| | Online | Offline |
+| --- | --- | --- |
+| **Java** | Read with `data get`, changed with `give`, `item replace` and `xp`. You see the commands in the console. | The player's saved data file is edited directly (a copy of the previous file is kept next to it). They see the result when they join. |
+| **Bedrock** | Through a small helper script inside the server. | Shown as it was when the player last left. Changes are queued and applied the moment they join; the editor already shows the result. |
+
+**The Bedrock helper.** Bedrock has no command that prints an inventory, and its player data sits in a database the running server keeps locked. So Blockhost installs a script-only behavior pack, *Blockhost Bridge*, into the server the first time you open an inventory there (one click, then one restart). It also switches on `content-log-console-output-enabled`, because the script answers through the content log; those lines are kept out of the console view.
+
+**Limits.**
+
+- On Java, the count of an item with enchantments, a custom name or wear cannot be changed for an online player, because replacing the stack would drop that data. Remove it or give a new one instead. Offline edits keep all data.
+- Items you add are plain: no enchantments or custom names yet. Existing ones are shown and preserved.
+- Bedrock players who have not joined since the helper was installed have nothing on record yet; you can still queue changes for them.
+- Item pictures are downloaded on first use from Mojang's public resource pack samples on GitHub and cached under `data/cache/icons`. Skins come from Mojang, or from GeyserMC's skin service for Bedrock accounts, which means the player's account id is sent to that service to look the skin up. Without internet the editor still works and shows initials instead.
 
 ## Remote play (playit.gg)
 

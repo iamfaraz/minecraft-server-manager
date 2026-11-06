@@ -19,4 +19,10 @@ class Bus extends EventEmitter {
   }
 }
 export const bus = new Bus();
+
+/**
+ * Lines the Blockhost Bridge script prints on a Bedrock server: ('line', serverId, tag, id, part, parts, text).
+ * They are protocol, not log output, so the instance routes them here instead of into the console.
+ */
+export const bridgeBus = new EventEmitter();
 bus.setMaxListeners(100);

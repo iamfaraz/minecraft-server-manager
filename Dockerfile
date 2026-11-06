@@ -71,6 +71,8 @@ COPY --from=server /app/server/dist ./server/dist
 COPY --from=server /app/server/node_modules ./server/node_modules
 COPY --from=server /app/server/package.json ./server/package.json
 COPY --from=web /app/web/dist ./web/dist
+# Add-ons Blockhost installs into servers itself (the Bedrock inventory bridge)
+COPY addons/blockhost-bridge ./addons/blockhost-bridge
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

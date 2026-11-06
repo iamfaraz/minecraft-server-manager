@@ -49,9 +49,13 @@ function offlineUuid(name: string): string {
 }
 const dashed = (u: string) => (u.includes('-') ? u : `${u.slice(0, 8)}-${u.slice(8, 12)}-${u.slice(12, 16)}-${u.slice(16, 20)}-${u.slice(20)}`);
 
-async function resolveJavaUuid(inst: ServerInstance, name: string): Promise<string> {
+export async function resolveJavaUuid(inst: ServerInstance, name: string): Promise<string> {
   const seen = inst.seen.get(name.toLowerCase());
   if (seen?.id) return seen.id;
+  // The server's own record of names it has met. This is the only place a cross-play (Floodgate) player's id
+  // appears: it is derived from their Xbox account and never printed in the log.
+  const cached = (await readJson<{ uuid: string; name: string }[]>(path.join(inst.root, 'usercache.json'), [])).find((u) => u.name?.toLowerCase() === name.toLowerCase());
+  if (cached?.uuid) return dashed(cached.uuid);
   const props = await PropertiesFile.load(path.join(inst.root, 'server.properties'));
   if (props.get('online-mode') === 'false') return offlineUuid(name);
   try {

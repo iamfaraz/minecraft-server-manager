@@ -5,7 +5,7 @@ import dgram from 'node:dgram';
 import path from 'node:path';
 import readline from 'node:readline';
 import { config } from '../config.js';
-import { bus } from '../events.js';
+import { bridgeBus, bus } from '../events.js';
 import { serverRoot, serverDir, serverRecordFile } from '../store.js';
 import { readJson, stripAnsi, which, writeJson, HttpError } from '../util.js';
 import { parseLine, type ParsedEvent } from './logparser.js';
@@ -18,6 +18,9 @@ import { javaMajorFor, syncJavaProperties, geyserEnv } from '../install/java.js'
 import { syncBedrockProperties, resolveAdvertiseIp } from '../install/bedrock.js';
 
 const LOG_RING = 1000;
+/** Output of the Blockhost Bridge script (see addons/blockhost-bridge), and Bedrock's acknowledgement of our requests to it. */
+const BRIDGE_LINE = /\[Scripting\] (BHRPC|BHEVT) (\S+) (\d+)\/(\d+) (.*)$/;
+const BRIDGE_ECHO = /Script event blockhost:rpc has been sent/;
 const HOST_TAG = '[Blockhost] ';
 const STATS_RING = 180; // 15 min at 5s
 
@@ -428,6 +431,12 @@ export class ServerInstance extends EventEmitter {
   }
 
   private onLine(line: string) {
+    const bridged = BRIDGE_LINE.exec(line);
+    if (bridged) {
+      bridgeBus.emit('line', this.id, bridged[1], bridged[2], Number(bridged[3]), Number(bridged[4]), bridged[5]);
+      return;
+    }
+    if (BRIDGE_ECHO.test(line)) return;
     if (!this.logStyleSeen) {
       const style = detectStyle(line);
       if (style) {

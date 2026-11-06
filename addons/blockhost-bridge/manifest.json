@@ -1,0 +1,20 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Blockhost Bridge",
+    "description": "Lets the Blockhost manager read and change player inventories and experience. A script that runs on the server only.",
+    "uuid": "5d0c1f0e-4a57-4d0b-9c1e-2f6a8f3b7c11",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 21, 90]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "b3c2a6f4-1d2e-4f7a-8a55-90d4c2e7b6a2",
+      "version": [1, 0, 0],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [{ "module_name": "@minecraft/server", "version": "2.0.0" }]
+}

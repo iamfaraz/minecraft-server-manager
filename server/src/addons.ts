@@ -223,7 +223,7 @@ export async function listPacks(inst: ServerInstance): Promise<BedrockPack[]> {
   ].filter((p) => !BUILT_IN_PACK.test(p.folder) || p.active);
 }
 
-async function setPackActive(inst: ServerInstance, kind: 'behavior' | 'resource', uuid: string, version: number[], active: boolean) {
+export async function setPackActive(inst: ServerInstance, kind: 'behavior' | 'resource', uuid: string, version: number[], active: boolean) {
   const f = worldPacksFile(inst, kind);
   await fsp.mkdir(path.dirname(f), { recursive: true });
   const list = (await readJson<{ pack_id: string; version: number[] }[]>(f, [])).filter((x) => x.pack_id !== uuid);
