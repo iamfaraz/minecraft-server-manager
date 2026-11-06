@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import { requireAuth } from '../auth.js';
-import { manager } from '../servers/manager.js';
+import { manager, type StartResolve } from '../servers/manager.js';
 import { HOST_MARK } from '../servers/hostlog.js';
 import { bad, PropertiesFile } from '../util.js';
 import type { CreateServerInput, ServerRecord, ServerType } from '../servers/types.js';
@@ -35,20 +35,28 @@ export async function serverRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post<{ Params: { id: string } }>('/api/servers/:id/start', async (req) => {
-    await manager.get(req.params.id).start();
+  app.post<{ Params: { id: string }; Body: { resolve?: StartResolve } }>('/api/servers/:id/start', async (req) => {
+    await manager.startServer(req.params.id, req.body?.resolve);
     return { ok: true };
   });
   app.post<{ Params: { id: string } }>('/api/servers/:id/stop', async (req) => {
     await manager.get(req.params.id).stop();
     return { ok: true };
   });
-  app.post<{ Params: { id: string } }>('/api/servers/:id/restart', async (req) => {
+  app.post<{ Params: { id: string }; Body: { resolve?: StartResolve } }>('/api/servers/:id/restart', async (req) => {
     const inst = manager.get(req.params.id);
     if (inst.isActive) await inst.stop();
-    await inst.start();
+    await manager.startServer(req.params.id, req.body?.resolve);
     return { ok: true };
   });
+
+  /* ---------------- Ports ---------------- */
+  app.get('/api/ports', async () => manager.portMap());
+  app.post<{ Params: { id: string }; Body: { port?: number | 'auto'; geyserPort?: number | 'auto'; share?: boolean } }>('/api/servers/:id/ports', async (req) =>
+    manager.assignPorts(req.params.id, req.body || {}),
+  );
+  app.post<{ Params: { id: string } }>('/api/servers/:id/ports/release', async (req) => manager.releasePorts(req.params.id));
+
   app.post<{ Params: { id: string } }>('/api/servers/:id/kill', async (req) => {
     manager.get(req.params.id).kill();
     return { ok: true };

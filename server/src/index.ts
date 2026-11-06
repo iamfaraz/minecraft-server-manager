@@ -27,7 +27,7 @@ async function main() {
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
   app.setErrorHandler((err: any, _req, reply) => {
-    if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
+    if (err instanceof HttpError) return reply.code(err.status).send({ ...err.data, error: err.message });
     const anyErr = err as any;
     if (anyErr.validation || anyErr.statusCode === 400) return reply.code(400).send({ error: err.message });
     if (anyErr.statusCode === 413) return reply.code(413).send({ error: 'Upload too large' });

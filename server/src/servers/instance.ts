@@ -10,6 +10,7 @@ import { serverRoot, serverDir, serverRecordFile } from '../store.js';
 import { readJson, stripAnsi, which, writeJson, HttpError } from '../util.js';
 import { parseLine, type ParsedEvent } from './logparser.js';
 import { lingeringTcpSockets, probeNetherNet } from './status.js';
+import { portNeeds, type PortConflict, type PortNeed } from './ports.js';
 import { HOST_MARK, bannerLines, defaultStyle, detectStyle, hostPrefix, levelFor, type HostLevel, type LogStyle } from './hostlog.js';
 import type { OnlinePlayer, PingResult, ServerRecord, ServerState, ServerSummary, StatsSample } from './types.js';
 import { ensureJava } from '../versions/runtime.js';
@@ -74,6 +75,8 @@ export class ServerInstance extends EventEmitter {
   private intentionalStop = false;
   private restartTimes: number[] = [];
   private restartTimer: NodeJS.Timeout | null = null;
+  /** The ports the running process was started with; the record may have been edited since. Null while stopped. */
+  liveNeeds: PortNeed[] | null = null;
   /** Bumped by every start and by a stop that interrupts one, so a start waiting for its port knows it was superseded. */
   private startSeq = 0;
   private netherNetRepairs = 0;
@@ -210,22 +213,9 @@ export class ServerInstance extends EventEmitter {
   /* ------------------------------------------------------------------ */
 
   private async checkPortFree(): Promise<void> {
-    const ports: { port: number; udp: boolean }[] =
-      this.rec.edition === 'java'
-        ? [
-            { port: this.rec.port, udp: false },
-            ...(this.rec.geyser && this.rec.geyserPort
-              ? [
-                  { port: this.rec.geyserPort, udp: true },
-                  { port: this.rec.geyserPort + 1, udp: true },
-                  { port: this.rec.geyserPort, udp: false },
-                ]
-              : []),
-          ]
-        : this.rec.transport === 'nethernet'
-          ? [{ port: this.rec.port, udp: true }, { port: this.rec.port, udp: false }]
-          : [{ port: this.rec.port, udp: true }, { port: this.rec.portV6 ?? this.rec.port + 1, udp: true }];
-    for (const { port, udp } of ports) {
+    const ports = portNeeds(this.rec).map((need) => ({ ...need, udp: need.proto === 'udp' }));
+    for (const need of ports) {
+      const { port, udp } = need;
       const free = await new Promise<boolean>((res) => {
         if (udp) {
           const s = dgram.createSocket('udp4');
@@ -247,7 +237,10 @@ export class ServerInstance extends EventEmitter {
           c.connect(port, '127.0.0.1', () => finish(false));
         }
       });
-      if (!free) throw new HttpError(409, `Port ${port}/${udp ? 'udp' : 'tcp'} is already in use`);
+      if (!free) {
+        const conflict: PortConflict = { port: need.port, proto: need.proto, role: need.role, slot: need.slot, holder: null };
+        throw new HttpError(409, `Port ${port}/${need.proto} is already in use by another program on this machine`, { code: 'PORT_CONFLICT', conflicts: [conflict] });
+      }
     }
   }
 
@@ -348,6 +341,7 @@ export class ServerInstance extends EventEmitter {
       this.pushLog(`[Blockhost] Starting: ${path.basename(cmd)} ${args.join(' ')}`);
       const proc = spawn(cmd, args, { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.proc = proc;
+      this.liveNeeds = portNeeds(this.rec);
       this.startedAt = new Date();
       this.players.clear();
       this.rec.lastRunning = true;
@@ -526,6 +520,7 @@ export class ServerInstance extends EventEmitter {
 
   private onExit(code: number | null, signal: NodeJS.Signals | null) {
     this.proc = null;
+    this.liveNeeds = null;
     const oom = this.lastOom || code === 137 || signal === 'SIGKILL' && !this.intentionalStop;
     this.lastExit = { code, signal, at: new Date().toISOString(), oom };
     this.players.clear();

@@ -97,7 +97,7 @@ export function Overview({ s }: { s: ServerSummary }) {
             {s.java && <Item label="Java" value={s.java.major === 'auto' ? 'Automatic' : `Java ${s.java.major}`} />}
             {s.java && <Item label="JVM flags" value={s.java.preset === 'aikar' ? "Aikar's" : s.java.preset === 'zgc' ? 'Generational ZGC' : 'None'} />}
             {s.build?.loaderVersion && <Item label="Loader" value={s.build.loaderVersion} />}
-            <Item label="Port" value={s.edition === 'bedrock' ? (s.transport === 'nethernet' ? `${s.port} UDP + TCP` : `${s.port} / ${s.portV6} UDP`) : `${s.port} TCP`} />
+            <Item label="Port" value={s.portsReleased ? 'Released; assigned again at start' : s.edition === 'bedrock' ? (s.transport === 'nethernet' ? `${s.port} UDP + TCP` : `${s.port} / ${s.portV6} UDP`) : `${s.port} TCP`} />
             {s.edition === 'bedrock' && <Item label="Transport" value={s.transport === 'nethernet' ? 'NetherNet (WebRTC)' : 'RakNet'} />}
             {s.edition === 'bedrock' && <Item label="Console broadcast" value={s.broadcast?.enabled ? 'On (Xbox Live)' : 'Off'} />}
             {s.geyser && s.geyserPort && <Item label="Bedrock (Geyser)" value={`${s.geyserPort} UDP/TCP${s.state === 'running' ? (s.geyserPing?.ok ? ' · online' : ' · not responding') : ''}`} />}

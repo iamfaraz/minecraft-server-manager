@@ -1,5 +1,6 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** `data` is the rest of the error response, for errors the UI can act on (`data.code` says which). */
+  constructor(public status: number, message: string, public data: Record<string, any> = {}) {
     super(message);
   }
 }
@@ -22,7 +23,7 @@ async function request<T>(method: string, url: string, body?: unknown, init: Req
   } catch {
     data = { error: text };
   }
-  if (!res.ok) throw new ApiError(res.status, data?.error || res.statusText || 'Request failed');
+  if (!res.ok) throw new ApiError(res.status, data?.error || res.statusText || 'Request failed', data && typeof data === 'object' ? data : {});
   return data as T;
 }
 

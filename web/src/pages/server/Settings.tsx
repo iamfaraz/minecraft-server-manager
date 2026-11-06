@@ -106,7 +106,7 @@ export function Settings({ s }: { s: ServerSummary }) {
               <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={java ? 'Port (TCP)' : 'Port (UDP, +1 for IPv6)'} hint={sys ? `Published range ${java ? sys.ports.java.join('–') : sys.ports.bedrock.join('–')}` : undefined}>
+              <Field label={java ? 'Port (TCP)' : 'Port (UDP, +1 for IPv6)'} hint={sys ? `Published range ${java ? sys.ports.java.join('–') : sys.ports.bedrock.join('–')}. See the Ports page to share or release ports.` : undefined}>
                 <input className="input font-mono" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })} />
               </Field>
               <Field label="World folder">

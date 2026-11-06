@@ -8,6 +8,7 @@ import { copy, hostAddress } from '../../lib/format';
 import { TYPE_LABEL } from '../../lib/types';
 import { ConfirmModal, EditionBadge, ProgressBar, Spinner, StatusPill } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { useServerStart } from '../../components/PortConflict';
 import { Overview } from './Overview';
 import { Console } from './Console';
 import { Players } from './Players';
@@ -34,6 +35,7 @@ export function ServerPage() {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [killOpen, setKillOpen] = useState(false);
+  const starter = useServerStart();
 
   if (isLoading && !s)
     return (
@@ -46,7 +48,8 @@ export function ServerPage() {
   const act = async (action: 'start' | 'stop' | 'restart' | 'kill') => {
     setBusy(action);
     try {
-      await api.post(`/api/servers/${s.id}/${action}`);
+      if (action === 'start' || action === 'restart') await starter.start(s.id, action);
+      else await api.post(`/api/servers/${s.id}/${action}`);
       if (action === 'kill') toast.success('Process killed');
     } catch (e) {
       toast.error((e as Error).message);
@@ -157,6 +160,7 @@ export function ServerPage() {
         <Route path="*" element={<Navigate to={`/servers/${s.id}`} replace />} />
       </Routes>
 
+      {starter.dialog}
       <ConfirmModal open={killOpen} onClose={() => setKillOpen(false)} onConfirm={() => act('kill')} title="Force kill the server?" body="SIGKILL skips the graceful save. Only use this if the server is hung. Unsaved chunks may be lost." confirmLabel="Kill process" danger busy={busy === 'kill'} />
     </div>
   );

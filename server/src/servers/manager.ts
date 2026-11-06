@@ -10,12 +10,32 @@ import { installBedrock } from '../install/bedrock.js';
 import { recommendedJavaMajor } from '../versions/java.js';
 import { ServerInstance } from './instance.js';
 import { pingBedrock, pingJava, probeNetherNet } from './status.js';
+import { heldPorts, portNeeds, slotSpan, type PortConflict, type PortNeed, type PortSlot } from './ports.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
 import { JAVA_TYPES } from './types.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
 
 const ALL_TYPES: ServerType[] = [...JAVA_TYPES, 'BEDROCK'];
+
+/** How to get past a port conflict when starting a server. */
+export type StartResolve = { mode: 'stop-others' } | { mode: 'auto' } | { mode: 'custom'; port?: number; geyserPort?: number };
+
+interface PortUse {
+  serverId: string;
+  name: string;
+  edition: string;
+  state: string;
+  slot: PortSlot;
+  /** The number the setting itself holds, as opposed to the second of a pair. */
+  primary: boolean;
+  role: string;
+  protos: string[];
+  /** Bound by a running server right now. */
+  inUse: boolean;
+  /** Its server gave the port up; shown so the admin can see where it went. */
+  released: boolean;
+}
 
 export class ServerManager {
   instances = new Map<string, ServerInstance>();
@@ -43,7 +63,7 @@ export class ServerManager {
     // Resume servers that should be running
     for (const inst of this.instances.values()) {
       if (inst.rec.installed && (inst.rec.autoStart || inst.rec.lastRunning)) {
-        inst.start().catch((e) => inst.pushLog(`[Blockhost] Auto-start failed: ${e.message}`));
+        this.startServer(inst.id).catch((e) => inst.pushLog(`[Blockhost] Auto-start failed: ${e.message}`));
       }
     }
     this.timers.push(setInterval(() => this.pollStats(), 5000));
@@ -137,29 +157,220 @@ export class ServerManager {
 
   /* ---------------------------- ports ---------------------------- */
 
+  /**
+   * Port numbers that are spoken for: everything a server holds, plus what a running server actually bound if its
+   * record was edited since. A stopped server that released its ports does not count.
+   */
   usedPorts(exceptId?: string): Set<number> {
     const used = new Set<number>();
     for (const i of this.instances.values()) {
       if (i.id === exceptId) continue;
-      used.add(i.rec.port);
-      if (i.rec.portV6) used.add(i.rec.portV6);
-      if (i.rec.geyser && i.rec.geyserPort) {
-        used.add(i.rec.geyserPort);
-        used.add(i.rec.geyserPort + 1); // NetherNet/WebRTC media port
-      }
+      if (i.isActive) for (const n of i.liveNeeds ?? []) used.add(n.port);
+      if (i.rec.portsReleased && !i.isActive) continue;
+      for (const h of heldPorts(i.rec)) used.add(h.port);
     }
     return used;
   }
 
-  allocatePort(kind: 'java' | 'bedrock' | 'udp', exceptId?: string, span = 1): number {
+  allocatePort(kind: 'java' | 'bedrock' | 'udp', exceptId?: string, span = 1, avoid?: Set<number>): number {
     const [lo, hi] = kind === 'java' ? config.javaPorts : config.bedrockPorts;
     const used = this.usedPorts(exceptId);
     for (let p = lo; p + span - 1 <= hi; p++) {
       let ok = true;
-      for (let k = 0; k < span; k++) if (used.has(p + k)) ok = false;
+      for (let k = 0; k < span; k++) if (used.has(p + k) || avoid?.has(p + k)) ok = false;
       if (ok) return p;
     }
-    throw conflict(`No free ${kind === 'java' ? 'TCP' : 'UDP'} ports left in the published range ${lo}-${hi}. Stop or delete a server, or widen MCSM_${kind === 'java' ? 'JAVA' : 'BEDROCK'}_PORTS.`);
+    throw conflict(`No free ${kind === 'java' ? 'TCP' : 'UDP'} ports left in the published range ${lo}-${hi}. Release or delete a server, or widen MCSM_${kind === 'java' ? 'JAVA' : 'BEDROCK'}_PORTS.`);
+  }
+
+  /**
+   * Point one of a server's port settings at `value` (a number, or 'auto' for the next free one in the range).
+   * A number another server holds is refused unless `share` is set. Sharing is allowed on purpose, for servers that
+   * take turns on a well-known port; the check at start makes sure only one of them runs at a time.
+   */
+  private setPort(inst: ServerInstance, slot: PortSlot, value: number | 'auto', share: boolean, avoid?: Set<number>): void {
+    const rec = inst.rec;
+    if (slot === 'geyserPort' && !(rec.edition === 'java' && rec.geyser)) throw bad('This server has no cross-play (Geyser) port');
+    const span = slotSpan(rec, slot);
+    // The server's other setting must not overlap with this one.
+    const own = new Set(heldPorts(rec).filter((h) => h.slot !== slot).map((h) => h.port));
+    let port: number;
+    if (value === 'auto') {
+      port = this.allocatePort(slot === 'geyserPort' ? 'udp' : rec.edition, inst.id, span, new Set([...own, ...(avoid ?? [])]));
+    } else {
+      port = Number(value);
+      if (!Number.isInteger(port) || port < 1024 || port + span - 1 > 65535) throw bad('Ports must be whole numbers from 1024 to 65535');
+      const wanted = Array.from({ length: span }, (_, k) => port + k);
+      if (wanted.some((p) => own.has(p))) throw bad(`Port ${port} overlaps with this server's other port`);
+      if (!share) {
+        const holders = [...this.instances.values()].filter(
+          (o) => o.id !== inst.id && !(o.rec.portsReleased && !o.isActive) && heldPorts(o.rec).some((h) => wanted.includes(h.port)),
+        );
+        if (holders.length) {
+          throw new HttpError(409, `Port ${port} is assigned to ${holders.map((h) => `"${h.rec.name}"`).join(' and ')}`, {
+            code: 'PORT_ASSIGNED',
+            port,
+            slot,
+            holders: holders.map((h) => ({ id: h.id, name: h.rec.name, state: h.state })),
+          });
+        }
+      }
+    }
+    if (slot === 'geyserPort') rec.geyserPort = port;
+    else {
+      rec.port = port;
+      rec.portV6 = rec.edition === 'bedrock' ? port + 1 : undefined;
+    }
+  }
+
+  async assignPorts(id: string, patch: { port?: number | 'auto'; geyserPort?: number | 'auto'; share?: boolean }): Promise<ServerSummary> {
+    const inst = this.get(id);
+    if (patch.port === undefined && patch.geyserPort === undefined) throw bad('Nothing to assign');
+    const before = JSON.stringify(heldPorts(inst.rec));
+    if (patch.port !== undefined) this.setPort(inst, 'port', patch.port, !!patch.share);
+    if (patch.geyserPort !== undefined) this.setPort(inst, 'geyserPort', patch.geyserPort, !!patch.share);
+    delete inst.rec.portsReleased;
+    await inst.save();
+    if (inst.isActive && before !== JSON.stringify(heldPorts(inst.rec))) inst.pushLog('[Blockhost] Ports changed; restart to apply.');
+    return inst.summary();
+  }
+
+  /** Let other servers have this (stopped) server's ports. It gets ports again when it is started or assigned. */
+  async releasePorts(id: string): Promise<ServerSummary> {
+    const inst = this.get(id);
+    if (inst.isActive) throw conflict('Stop the server before releasing its ports');
+    inst.rec.portsReleased = true;
+    await inst.save();
+    return inst.summary();
+  }
+
+  /** A server that released its ports gets the old numbers back if nobody took them, and new ones otherwise. */
+  private reclaimPorts(inst: ServerInstance): boolean {
+    const rec = inst.rec;
+    if (!rec.portsReleased) return false;
+    const used = this.usedPorts(inst.id);
+    for (const slot of ['port', 'geyserPort'] as PortSlot[]) {
+      const held = heldPorts(rec).filter((h) => h.slot === slot);
+      if (!held.length || !held.some((h) => used.has(h.port))) continue;
+      const old = held[0].port;
+      this.setPort(inst, slot, 'auto', false);
+      inst.pushLog(`[Blockhost] Port ${old} went to another server while this one was stopped; now using ${slot === 'port' ? rec.port : rec.geyserPort}.`);
+    }
+    delete rec.portsReleased;
+    return true;
+  }
+
+  /** Ports this server needs that a running Blockhost server is using right now. */
+  portConflicts(inst: ServerInstance): PortConflict[] {
+    const out: PortConflict[] = [];
+    for (const need of portNeeds(inst.rec)) {
+      for (const other of this.instances.values()) {
+        if (other.id === inst.id || !other.isActive) continue;
+        const theirs = other.liveNeeds ?? portNeeds(other.rec);
+        if (theirs.some((t) => t.port === need.port && t.proto === need.proto)) out.push({ ...need, holder: { id: other.id, name: other.rec.name, state: other.state } });
+      }
+    }
+    return out;
+  }
+
+  private portConflictError(inst: ServerInstance, conflicts: PortConflict[]): HttpError {
+    const first = conflicts[0];
+    const message = first.holder ? `Port ${first.port} is in use by "${first.holder.name}"` : `Port ${first.port} is in use by another program on this machine`;
+    // What "pick one for me" would choose, per affected setting; absent when the range is full.
+    const suggestion: Partial<Record<PortSlot, number>> = {};
+    for (const slot of new Set(conflicts.map((c) => c.slot))) {
+      try {
+        suggestion[slot] = this.allocatePort(slot === 'geyserPort' ? 'udp' : inst.rec.edition, inst.id, slotSpan(inst.rec, slot), new Set(conflicts.map((c) => c.port)));
+      } catch {
+        /* no free port */
+      }
+    }
+    return new HttpError(409, message, { code: 'PORT_CONFLICT', server: { id: inst.id, name: inst.rec.name }, conflicts, suggestion });
+  }
+
+  /**
+   * Start a server, making sure its ports are free first. If another running server (or another program) has one
+   * of them, this fails with a PORT_CONFLICT error describing who and offering a free port, and the caller can
+   * retry with `resolve`: stop the servers in the way, let Blockhost pick new ports, or name the ports to use.
+   */
+  async startServer(id: string, resolve?: StartResolve): Promise<void> {
+    const inst = this.get(id);
+    if (inst.isActive) throw conflict('Server is already running');
+    if (inst.state === 'installing') throw conflict('Server is installing');
+    let changed = this.reclaimPorts(inst);
+    if (resolve?.mode === 'custom') {
+      if (resolve.port !== undefined) this.setPort(inst, 'port', resolve.port, true);
+      if (resolve.geyserPort !== undefined) this.setPort(inst, 'geyserPort', resolve.geyserPort, true);
+      changed = true;
+    }
+    const avoid = new Set<number>();
+    const moveAway = (conflicts: PortConflict[]) => {
+      for (const c of conflicts) avoid.add(c.port);
+      for (const slot of new Set(conflicts.map((c) => c.slot))) this.setPort(inst, slot, 'auto', false, avoid);
+      changed = true;
+    };
+    let conflicts = this.portConflicts(inst);
+    if (conflicts.length && resolve?.mode === 'auto') {
+      moveAway(conflicts);
+      conflicts = this.portConflicts(inst);
+    }
+    if (conflicts.length && resolve?.mode === 'stop-others') {
+      for (const holderId of new Set(conflicts.map((c) => c.holder!.id))) await this.get(holderId).stop();
+      conflicts = this.portConflicts(inst);
+    }
+    if (changed) await inst.save();
+    if (conflicts.length) throw this.portConflictError(inst, conflicts);
+
+    // The instance itself checks for programs outside Blockhost. With "auto", keep moving until a start succeeds.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await inst.start();
+        return;
+      } catch (e) {
+        const external = e instanceof HttpError && e.data?.code === 'PORT_CONFLICT' ? (e.data.conflicts as PortConflict[]) : null;
+        if (!external) throw e;
+        inst.setState('stopped'); // a question for the user, not a failed server
+        if (resolve?.mode === 'auto' && attempt < 5) {
+          moveAway(external);
+          await inst.save();
+          continue;
+        }
+        throw this.portConflictError(inst, external);
+      }
+    }
+  }
+
+  /** Everything the port manager page shows: the published ranges and who holds or uses each port number. */
+  portMap() {
+    const ports = new Map<number, PortUse[]>();
+    const add = (port: number, use: PortUse) => ports.set(port, [...(ports.get(port) ?? []), use]);
+    for (const inst of this.instances.values()) {
+      const rec = inst.rec;
+      const base = { serverId: inst.id, name: rec.name, edition: rec.edition, state: inst.state };
+      const released = !!rec.portsReleased && !inst.isActive;
+      const needs = portNeeds(rec);
+      const live = inst.isActive ? (inst.liveNeeds ?? needs) : [];
+      const describe = (list: PortNeed[], port: number) => {
+        const mine = list.filter((n) => n.port === port);
+        return { role: mine.map((n) => n.role).join(', '), protos: [...new Set(mine.map((n) => n.proto))] };
+      };
+      const held = heldPorts(rec);
+      for (const h of held) {
+        const d = describe(needs, h.port);
+        add(h.port, { ...base, slot: h.slot, primary: h.port === (h.slot === 'port' ? rec.port : rec.geyserPort), role: d.role || 'Held as this server\'s second port', protos: d.protos, inUse: live.some((n) => n.port === h.port), released });
+      }
+      // A running server whose ports were changed still occupies the old ones until it restarts.
+      for (const port of new Set(live.map((n) => n.port))) {
+        if (held.some((h) => h.port === port)) continue;
+        const d = describe(live, port);
+        add(port, { ...base, slot: live.find((n) => n.port === port)!.slot, primary: false, role: `${d.role} (until restart)`, protos: d.protos, inUse: true, released: false });
+      }
+    }
+    return {
+      hostNetwork: config.hostNetwork,
+      ranges: { java: config.javaPorts, bedrock: config.bedrockPorts },
+      ports: [...ports.entries()].sort((a, b) => a[0] - b[0]).map(([port, uses]) => ({ port, uses })),
+    };
   }
 
   /* ---------------------------- create ---------------------------- */
@@ -252,7 +463,7 @@ export class ServerManager {
       inst.install = null;
       bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Ready', done: true });
       inst.setState('stopped');
-      if (startAfter) await inst.start();
+      if (startAfter) await this.startServer(inst.id);
     } catch (e) {
       const msg = (e as Error).message;
       inst.pushLog(`[Blockhost] Install failed: ${msg}`);
@@ -313,13 +524,9 @@ export class ServerManager {
     if (patch.autoStart !== undefined) rec.autoStart = !!patch.autoStart;
     if (patch.restartOnCrash !== undefined) rec.restartOnCrash = !!patch.restartOnCrash;
     if (patch.backup) rec.backup = { ...rec.backup, ...patch.backup };
-    if (patch.port !== undefined && patch.port !== rec.port) {
-      const p = Number(patch.port);
-      if (!Number.isInteger(p) || p < 1024 || p > 65535) throw bad('Invalid port');
-      const used = this.usedPorts(id);
-      if (used.has(p) || (rec.edition === 'bedrock' && used.has(p + 1))) throw conflict('Port already assigned to another server');
-      rec.port = p;
-      if (rec.edition === 'bedrock') rec.portV6 = p + 1;
+    if (patch.port !== undefined && Number(patch.port) !== rec.port) {
+      this.setPort(inst, 'port', Number(patch.port), false);
+      delete rec.portsReleased;
       needsRestart.push('port');
     }
     if (patch.levelName !== undefined && patch.levelName !== rec.levelName) {
@@ -360,11 +567,8 @@ export class ServerManager {
         if (rec.broadcast?.enabled) rec.broadcast = { enabled: false };
       }
       needsRestart.push('geyser');
-    } else if (rec.geyser && patch.geyserPort !== undefined && patch.geyserPort !== rec.geyserPort) {
-      const p = Number(patch.geyserPort);
-      const usedNow = this.usedPorts(id);
-      if (usedNow.has(p) || usedNow.has(p + 1) || p === rec.port) throw conflict('Port already assigned (Geyser needs two consecutive UDP ports)');
-      rec.geyserPort = p;
+    } else if (rec.geyser && patch.geyserPort !== undefined && Number(patch.geyserPort) !== rec.geyserPort) {
+      this.setPort(inst, 'geyserPort', Number(patch.geyserPort), false);
       needsRestart.push('geyser');
     }
     await inst.save();
@@ -416,7 +620,7 @@ export class ServerManager {
         bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Updated', done: true });
         inst.setState('stopped');
         inst.pushLog(`[Blockhost] Now on ${rec.type} ${rec.version}`);
-        if (wasRunning) await inst.start();
+        if (wasRunning) await this.startServer(inst.id);
       } catch (e) {
         const msg = (e as Error).message;
         inst.pushLog(`[Blockhost] Update failed: ${msg}`);

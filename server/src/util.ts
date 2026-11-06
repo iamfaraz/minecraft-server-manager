@@ -10,7 +10,8 @@ import { config } from './config.js';
 export const UA = 'Blockhost-MinecraftServerManager/0.1 (+https://github.com)';
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /** `data` is sent to the client next to the message, for errors the UI can act on (e.g. a port conflict). */
+  constructor(public status: number, message: string, public data?: Record<string, unknown>) {
     super(message);
   }
 }

@@ -8,6 +8,7 @@ import { fmtMb, hostAddress } from '../lib/format';
 import { TYPE_LABEL, type ServerSummary, type SystemInfo } from '../lib/types';
 import { EditionBadge, EmptyState, ProgressBar, Stat, StatusPill } from '../components/ui';
 import { useToast } from '../components/Toast';
+import { useServerStart } from '../components/PortConflict';
 
 function Sparkline({ id }: { id: string }) {
   const { data } = useQuery({ queryKey: ['stats', id], queryFn: () => api.get<{ samples: { t: number; cpu: number }[] }>(`/api/servers/${id}/stats`), refetchInterval: 10_000 });
@@ -34,16 +35,19 @@ function ServerCard({ s }: { s: ServerSummary }) {
   const nav = useNavigate();
   const toast = useToast();
   const busy = s.state === 'starting' || s.state === 'stopping' || s.state === 'installing';
+  const starter = useServerStart();
   const act = async (e: React.MouseEvent, action: 'start' | 'stop') => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      await api.post(`/api/servers/${s.id}/${action}`);
+      if (action === 'start') await starter.start(s.id);
+      else await api.post(`/api/servers/${s.id}/${action}`);
     } catch (err) {
       toast.error((err as Error).message);
     }
   };
   return (
+    <>
     <Link to={`/servers/${s.id}`} className="card card-hover fade-up group flex flex-col gap-4 p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -52,7 +56,7 @@ function ServerCard({ s }: { s: ServerSummary }) {
             <EditionBadge edition={s.edition} />
           </div>
           <p className="mt-0.5 text-xs text-muted">
-            {TYPE_LABEL[s.type]} {s.version} · <span className="font-mono">{hostAddress(s.port)}</span>
+            {TYPE_LABEL[s.type]} {s.version} · <span className="font-mono">{s.portsReleased ? 'port released' : hostAddress(s.port)}</span>
           </p>
         </div>
         <StatusPill state={s.state} />
@@ -94,6 +98,8 @@ function ServerCard({ s }: { s: ServerSummary }) {
         </div>
       </div>
     </Link>
+    {starter.dialog}
+    </>
   );
 }
 

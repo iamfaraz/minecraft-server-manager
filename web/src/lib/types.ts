@@ -78,6 +78,8 @@ export interface ServerSummary {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  /** Gave up its ports while stopped; it gets ports again at the next start. */
+  portsReleased?: boolean;
   backup: { schedule: BackupSchedule; keep: number; scope: BackupScope };
   installed: boolean;
   createdAt: string;
@@ -166,3 +168,49 @@ export type WsEvent =
   | { type: 'broadcast'; id: string; status: any }
   | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
   | { type: 'pong' };
+
+/* ---- ports ---- */
+export type PortSlot = 'port' | 'geyserPort';
+
+export interface PortUse {
+  serverId: string;
+  name: string;
+  edition: Edition;
+  state: ServerState;
+  slot: PortSlot;
+  /** The number the setting itself holds, as opposed to the second of a pair. */
+  primary: boolean;
+  role: string;
+  protos: ('tcp' | 'udp')[];
+  /** Bound by a running server right now. */
+  inUse: boolean;
+  /** Its server gave the port up. */
+  released: boolean;
+}
+
+export interface PortMap {
+  hostNetwork: boolean;
+  ranges: { java: [number, number]; bedrock: [number, number] };
+  ports: { port: number; uses: PortUse[] }[];
+}
+
+export interface PortConflict {
+  port: number;
+  proto: 'tcp' | 'udp';
+  role: string;
+  slot: PortSlot;
+  /** The Blockhost server using the port, or null when a program outside Blockhost is. */
+  holder: { id: string; name: string; state: ServerState } | null;
+}
+
+/** The body of a 409 from start/restart when a needed port is taken. */
+export interface PortConflictError {
+  code: 'PORT_CONFLICT';
+  error: string;
+  server: { id: string; name: string };
+  conflicts: PortConflict[];
+  /** A free port per affected setting; a setting is missing when its range is full. */
+  suggestion: Partial<Record<PortSlot, number>>;
+}
+
+export type StartResolve = { mode: 'stop-others' } | { mode: 'auto' } | { mode: 'custom'; port?: number; geyserPort?: number };

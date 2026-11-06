@@ -20,6 +20,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
 - **Armor HUD add-on for Bedrock:** held items, armour durability, arrows and free slots around the hotbar, for every Bedrock client. See *Bedrock add-on: Armor HUD* below.
+- **Port manager:** one page showing which server holds or uses every port, with assign, share and release, and a prompt on Start when a port is taken. See *Ports* below.
 - **Bedrock transport choice:** NetherNet (Mojang's WebRTC transport, required by current Bedrock versions) or RakNet (the classic protocol, for older versions) per server.
 - Runs as your host user (`PUID`/`PGID`), so `./data` stays yours.
 
@@ -48,6 +49,19 @@ Docker can only publish ports when the container starts, so the compose file pub
 | `MCSM_BEDROCK_PORTS`  | `19132-19141`  | Bedrock servers and Geyser (two consecutive ports each): UDP, plus TCP for NetherNet signaling |
 
 Widen the ranges in `.env` if you need more servers. Players on your LAN connect to `<host-ip>:<port>`; the UI shows the address on each server.
+
+### Managing ports
+
+The **Ports** page lists every port in the two ranges and who has it: *In use* (a running server), *Assigned* (held by a stopped server), *Shared*, or *Free*.
+
+- **Change** gives a server the next free port or one you choose. A Bedrock server and a Java server's cross-play port each take two ports in a row.
+- **Share** lets several servers hold the same port, for servers that take turns on the default port so players never change the address. Choose a port another server holds and confirm.
+- **Release** makes a stopped server give up its ports so others can take them. When you start it again it gets its old ports back if they are still free, and new ones otherwise.
+- **Assign** on a free port hands that port to a server you pick.
+
+Starting a server whose port is taken by another running server (or by another program on the machine) opens a dialog with three choices: stop the server in the way, move to the next free port, or enter a port. Servers started automatically, at boot or after a crash, cannot ask, so they report the conflict in their console instead.
+
+A port outside the published ranges works inside the container but is only reachable if you publish it yourself, unless you use host networking.
 
 ### Run as your own user (PUID/PGID)
 

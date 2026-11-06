@@ -55,6 +55,11 @@ export interface ServerRecord {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  /**
+   * The server gave up its ports while stopped, so other servers may take them. It keeps the old numbers as a
+   * preference: at the next start it gets them back if they are still free, and new ones otherwise.
+   */
+  portsReleased?: boolean;
   backup: { schedule: BackupSchedule; keep: number; scope: BackupScope };
   installed: boolean;
   lastRunning: boolean;

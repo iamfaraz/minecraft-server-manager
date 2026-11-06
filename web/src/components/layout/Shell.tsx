@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Globe2, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
+import { Cable, Globe2, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useServers } from '../../hooks/useServers';
@@ -73,6 +73,9 @@ export function Shell({ user, onLogout }: { user: string; onLogout: () => void }
         <div className="mt-4 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted">Network</div>
         <NavLink to="/remote" className={navClass} onClick={() => setOpen(false)}>
           <Globe2 className="size-4" /> Remote play
+        </NavLink>
+        <NavLink to="/ports" className={navClass} onClick={() => setOpen(false)}>
+          <Cable className="size-4" /> Ports
         </NavLink>
         <NavLink to="/system" className={navClass} onClick={() => setOpen(false)}>
           <Settings2 className="size-4" /> System
