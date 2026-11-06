@@ -84,7 +84,7 @@ const OVERRIDES = {
   fire_charge: 'fireball', firework_rocket: 'fireworks', firework_star: 'fireworks_charge', dragon_breath: 'dragons_breath',
   glass_bottle: 'potion_bottle_empty', potion: 'potion_bottle_drinkable', splash_potion: 'potion_bottle_splash', lingering_potion: 'potion_bottle_lingering',
   heart_of_the_sea: 'heartofthesea_closed', redstone: 'redstone_dust', slime_ball: 'slimeball', turtle_scute: 'turtle_shell_piece',
-  sugar_cane: 'reeds', oak_sign: 'sign', dark_oak_sign: 'sign_darkoak', iron_chain: 'chain', bed: 'bed_red',
+  sugar_cane: 'reeds', oak_sign: 'sign', dark_oak_sign: 'sign_darkoak', iron_chain: 'chain', bed: 'bed_white',
   // blocks whose id is not their key in Mojang's block table
   grass_block: 'blocks/grass_side_carried', sea_lantern: 'blocks/sea_lantern', rail: 'blocks/rail_normal',
   red_shrub: 'blocks/red_shrub', shelf_mushroom: 'blocks/shelf_mushroom_large', barrel: 'blocks/barrel_side',

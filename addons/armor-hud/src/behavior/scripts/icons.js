@@ -75,7 +75,7 @@ export const ICONS = {
 "basalt":"blocks/basalt_side",
 "bat_spawn_egg":"items/spawn_eggs/spawn_egg_bat",
 "beacon":"blocks/glass",
-"bed":"items/bed_red",
+"bed":"items/bed_white",
 "bedrock":"blocks/bedrock",
 "bee_nest":"blocks/bee_nest_front",
 "bee_spawn_egg":"items/spawn_eggs/spawn_egg_bee",
