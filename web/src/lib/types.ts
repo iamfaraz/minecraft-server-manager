@@ -256,3 +256,23 @@ export interface CatalogueItem {
   name: string;
   icon: boolean;
 }
+
+/* ---- updates and storage ---- */
+export interface UpdateCheck {
+  checkedAt: string;
+  current: { type: string; version: string; build?: string; installedAt?: string };
+  build: { available: boolean; unknown?: boolean; label: string } | null;
+  version: { available: boolean; latest: string | null; label: string };
+}
+
+export interface StorageOverview {
+  disk: { free: number; total: number } | null;
+  dataDir: string;
+  total: number;
+  servers: { id: string; name: string; edition: Edition; state: ServerState; files: number; backups: number; other: number; backupCount: number }[];
+  cache: { bytes: number; files: { name: string; bytes: number; modifiedAt: string }[] };
+  icons: number;
+  runtimes: { name: string; key: string; bytes: number; inUse: boolean }[];
+  imports: { id: string; name: string; edition: Edition; bytes: number; createdAt: string }[];
+  playit: number;
+}

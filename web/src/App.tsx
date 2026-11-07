@@ -10,6 +10,7 @@ import { ServerPage } from './pages/server/ServerPage';
 import { RemotePlay } from './pages/RemotePlay';
 import { System } from './pages/System';
 import { Ports } from './pages/Ports';
+import { Storage } from './pages/Storage';
 import { Spinner } from './components/ui';
 
 type Auth = { loading: true } | { loading: false; setupRequired: boolean; user: string | null };
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="servers/:id/*" element={<ServerPage />} />
         <Route path="remote" element={<RemotePlay />} />
         <Route path="ports" element={<Ports />} />
+        <Route path="storage" element={<Storage />} />
         <Route path="system" element={<System />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

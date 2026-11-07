@@ -20,6 +20,7 @@ A single Docker container that runs and manages any number of Minecraft servers,
 - Graceful lifecycle: `stop` → wait → SIGTERM → SIGKILL; crash detection with OOM hints and bounded auto-restart; servers that were running are resumed after the container restarts.
 - **Console players (Switch / Xbox / PlayStation).** A per-server toggle runs [MCXboxBroadcast](https://github.com/MCXboxBroadcast/Broadcaster) next to a Bedrock server: sign a spare Microsoft account in with the code shown in the UI, and the server appears in that account's friends' Friends tab. See *Console players* below.
 - **Armor HUD add-on for Bedrock:** held items, armour durability, arrows and free slots around the hotbar, for every Bedrock client. See *Bedrock add-on: Armor HUD* below.
+- **Update check and storage page:** see which servers have a newer build or version available and install it, with a warning when the server is running; see what takes space and clear downloads, runtimes, imports and backups.
 - **Inventory editor:** view and change any player's inventory and experience level, online or offline, on Java and Bedrock, in a screen laid out like Minecraft's own. See *Player inventories and experience* below.
 - **Port manager:** one page showing which server holds or uses every port, with assign, share and release, and a prompt on Start when a port is taken. See *Ports* below.
 - **Bedrock transport choice:** NetherNet (Mojang's WebRTC transport, required by current Bedrock versions) or RakNet (the classic protocol, for older versions) per server.
@@ -212,6 +213,24 @@ The bundled agent is pinned to playit **0.15.26**, the last single-binary releas
 **Bedrock.** Mojang has no version manifest for BDS, so the manager uses the same download-links API as the official download page to find the current release and preview, and falls back to the known CDN URL pattern for an explicit version. On update the zip is extracted with `server.properties`, `allowlist.json`, `permissions.json`, `worlds/`, `behavior_packs/` and `resource_packs/` excluded.
 
 Downloads are cached in `data/cache`, so re-creating a server on the same version is instant.
+
+### Checking for updates
+
+Under a server's **Versions** tab, **Check for updates** compares what is installed with what the download servers offer, when you ask for it (nothing is checked in the background). It reports two things separately:
+
+- **A newer build of the same version** (a new Paper build, Fabric loader, Forge or NeoForge version). Installing it keeps the world as it is. Purpur publishes no build number, so for Purpur the button reinstalls, which fetches the newest build.
+- **A newer Minecraft version** for the server type. Installing it takes a backup of the world first, because the game upgrades the world on the first start and that cannot be undone.
+
+If the server is running, the confirmation says so: installing stops the server, which disconnects everyone, and starts it again when the install is done. Stopped servers stay stopped.
+
+## Storage
+
+The **Storage** page shows what the data folder holds and lets you clear the parts that are safe to clear:
+
+- **Servers:** world and server files, plus the size and number of each server's backups, with a button to delete all of a server's backups.
+- **Downloaded server files:** jars, Bedrock archives and Java downloads kept so reinstalls are fast. Clear one or all; they are fetched again when needed. The item pictures used by the inventory editor are listed here too.
+- **Runtimes:** downloaded Java versions and the console broadcaster. One that a running server may be using cannot be removed.
+- **World imports:** uploaded worlds waiting to be imported. Servers already created from an import keep their own copy.
 
 ## Docker image
 

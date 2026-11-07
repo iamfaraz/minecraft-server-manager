@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Cable, Globe2, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
+import { Cable, Globe2, HardDrive, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useServers } from '../../hooks/useServers';
@@ -76,6 +76,9 @@ export function Shell({ user, onLogout }: { user: string; onLogout: () => void }
         </NavLink>
         <NavLink to="/ports" className={navClass} onClick={() => setOpen(false)}>
           <Cable className="size-4" /> Ports
+        </NavLink>
+        <NavLink to="/storage" className={navClass} onClick={() => setOpen(false)}>
+          <HardDrive className="size-4" /> Storage
         </NavLink>
         <NavLink to="/system" className={navClass} onClick={() => setOpen(false)}>
           <Settings2 className="size-4" /> System

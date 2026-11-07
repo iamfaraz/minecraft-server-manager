@@ -1,3 +1,5 @@
+import { deleteAllBackups } from '../storage.js';
+import { checkUpdates } from '../updates.js';
 import * as assets from '../inventory/assets.js';
 import * as inventory from '../inventory/index.js';
 import type { FastifyInstance } from 'fastify';
@@ -54,6 +56,7 @@ export async function contentRoutes(app: FastifyInstance) {
     inst.pushLog(`[Blockhost] Backup "${meta.label}" created (${fmtBytes(meta.bytes)})`);
     return meta;
   });
+  app.delete<{ Params: { id: string } }>('/api/servers/:id/backups', async (req) => ({ deleted: await deleteAllBackups(req.params.id) }));
   app.post<{ Params: { id: string; bid: string } }>('/api/servers/:id/backups/:bid/restore', async (req) => {
     await restoreBackup(manager.get(req.params.id), req.params.bid);
     return { ok: true };
@@ -72,6 +75,18 @@ export async function contentRoutes(app: FastifyInstance) {
     reply.header('Content-Length', st.size);
     reply.header('Content-Disposition', `attachment; filename="${req.params.bid}.tar.gz"`);
     return reply.send(fs.createReadStream(f));
+  });
+
+  /* ---------------- Updates ---------------- */
+  app.get<{ Params: { id: string } }>('/api/servers/:id/updates', async (req) => checkUpdates(manager.get(req.params.id)));
+  app.post<{ Params: { id: string }; Body: { target: 'build' | 'version'; version?: string } }>('/api/servers/:id/updates/apply', async (req) => {
+    const inst = manager.get(req.params.id);
+    const wasRunning = inst.isActive;
+    if (req.body?.target === 'version') {
+      if (!req.body.version) throw bad('version is required');
+      await manager.changeVersion(inst.id, { version: req.body.version, backupFirst: true });
+    } else await manager.changeVersion(inst.id, { version: inst.rec.version, backupFirst: false });
+    return { ok: true, wasRunning };
   });
 
   /* ---------------- Inventories ---------------- */

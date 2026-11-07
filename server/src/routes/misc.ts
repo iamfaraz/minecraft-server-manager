@@ -1,3 +1,4 @@
+import * as storage from '../storage.js';
 import type { FastifyInstance } from 'fastify';
 import os from 'node:os';
 import fsp from 'node:fs/promises';
@@ -65,6 +66,25 @@ export async function miscRoutes(app: FastifyInstance) {
   app.get('/api/versions/bedrock', async () => bedrockVersions());
 
   /* ---------------- World imports ---------------- */
+  /* ---------------- Storage ---------------- */
+  app.get('/api/storage', async () => storage.storageOverview());
+  app.delete('/api/storage/cache', async () => {
+    await storage.clearCache();
+    return { ok: true };
+  });
+  app.delete<{ Params: { name: string } }>('/api/storage/cache/:name', async (req) => {
+    await storage.clearCache(req.params.name);
+    return { ok: true };
+  });
+  app.delete('/api/storage/icons', async () => {
+    await storage.clearIcons();
+    return { ok: true };
+  });
+  app.delete<{ Params: { '*': string } }>('/api/storage/runtimes/*', async (req) => {
+    await storage.removeRuntime(req.params['*']);
+    return { ok: true };
+  });
+
   app.get('/api/imports', async () => ({ imports: await listImports(), folders: await unregisteredFolders() }));
   app.post('/api/imports/upload', async (req) => importFromUpload(req));
   app.post<{ Body: { folder: string; name?: string } }>('/api/imports/register', async (req) => importFromServerFolder(req.body?.folder || '', req.body?.name));

@@ -7,6 +7,7 @@ import { api } from '../../lib/api';
 import { JAVA_TYPES, TYPE_LABEL, type JavaType, type ServerSummary, type ServerType } from '../../lib/types';
 import { Card, ConfirmModal, Spinner, Toggle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { UpdatesCard } from '../../components/UpdatesCard';
 
 export function Versions({ s }: { s: ServerSummary }) {
   const qc = useQueryClient();
@@ -60,6 +61,7 @@ export function Versions({ s }: { s: ServerSummary }) {
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-5">
       <div className="space-y-5 lg:col-span-2">
+        <UpdatesCard s={s} />
         <Card title="Installed">
           <div className="flex items-center justify-between">
             <div>
