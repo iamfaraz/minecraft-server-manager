@@ -40,7 +40,7 @@ export const config = {
   webDist: process.env.MCSM_WEB_DIST || path.resolve(here, '..', '..', 'web', 'dist'),
   arch: os.arch(), // 'x64' | 'arm64'
   platform: os.platform(), // 'linux' | 'darwin'
-  version: process.env.MCSM_VERSION || '0.1.0',
+  version: process.env.MCSM_VERSION || '1.5.0',
   stopTimeoutMs: Number(process.env.MCSM_STOP_TIMEOUT_MS || 60_000),
 };
 
