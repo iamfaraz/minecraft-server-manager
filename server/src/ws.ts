@@ -8,7 +8,11 @@ import { playit } from './playit.js';
 interface Client {
   ws: WebSocket;
   subs: Set<string>;
+  alive: boolean;
 }
+
+/** Protocol pings find browsers that vanished without closing (sleep, network change), so they stop piling up. */
+const PING_EVERY_MS = 30_000;
 
 export async function wsRoutes(app: FastifyInstance) {
   const clients = new Set<Client>();
@@ -19,9 +23,31 @@ export async function wsRoutes(app: FastifyInstance) {
       if (ev.type === 'server.log' && !c.subs.has(ev.id)) continue;
       if (c.ws.readyState !== c.ws.OPEN) continue;
       payload ??= JSON.stringify(ev);
-      c.ws.send(payload);
+      try {
+        c.ws.send(payload);
+      } catch {
+        clients.delete(c);
+      }
     }
   });
+
+  const sweep = setInterval(() => {
+    for (const c of clients) {
+      if (!c.alive) {
+        clients.delete(c);
+        c.ws.terminate();
+        continue;
+      }
+      c.alive = false;
+      try {
+        c.ws.ping();
+      } catch {
+        /* closed */
+      }
+    }
+  }, PING_EVERY_MS);
+  sweep.unref();
+  app.addHook('onClose', async () => clearInterval(sweep));
 
   app.get('/ws', { websocket: true }, (socket, req) => {
     const user = userFromCookieHeader(req.headers.cookie);
@@ -29,10 +55,12 @@ export async function wsRoutes(app: FastifyInstance) {
       socket.close(4401, 'unauthorized');
       return;
     }
-    const client: Client = { ws: socket, subs: new Set() };
+    const client: Client = { ws: socket, subs: new Set(), alive: true };
+    socket.on('pong', () => (client.alive = true));
     clients.add(client);
     socket.send(JSON.stringify({ type: 'hello', servers: manager.list(), playit: playit.status() }));
     socket.on('message', (raw) => {
+      client.alive = true;
       try {
         const msg = JSON.parse(String(raw));
         if (msg.type === 'subscribe' && typeof msg.id === 'string') {

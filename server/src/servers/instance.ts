@@ -209,6 +209,9 @@ export class ServerInstance extends EventEmitter {
     if (!this.proc || !this.proc.stdin || !this.proc.stdin.writable) throw new HttpError(409, 'Server is not running');
     const cmd = command.replace(/^\//, '').trim();
     if (!cmd) return;
+    // A background query (game rules, inventory) may be hiding lines like "Gamerule x is currently set to";
+    // the reply to a command typed by the user must still show.
+    this.muted = null;
     this.proc.stdin.write(cmd + '\n');
     this.pushLog(`> ${cmd}`);
   }
