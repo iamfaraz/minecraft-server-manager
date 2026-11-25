@@ -320,3 +320,10 @@ test('a network error names its cause, not just "fetch failed"', async () => {
   const m = mk({ backoffMs: [] });
   await assert.rejects(m.download(`http://127.0.0.1:${port}/x`, dest()), /ECONNREFUSED/);
 });
+
+test('a caller can ask for more attempts than the default', async () => {
+  await assert.rejects(mk().download(`${fx.url}/flaky/3/100`, dest()));
+  const m = mk();
+  await m.download(`${fx.url}/flaky/3/101`, dest(), { backoffMs: [5, 5, 5] });
+  assert.equal(m.jobs().at(-1)!.attempt, 4);
+});

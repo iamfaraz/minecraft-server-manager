@@ -24,6 +24,8 @@ export interface DownloadCtx {
   signal?: AbortSignal;
   /** Other URLs for the same file, tried in order within the same job when `url` fails. */
   mirrors?: string[];
+  /** Waits between attempts for this download (one more attempt than entries); defaults to the manager's. */
+  backoffMs?: number[];
 }
 
 export interface DownloadJob {
@@ -382,7 +384,8 @@ export class DownloadManager {
       throw e;
     }
     try {
-      const attempts = this.opts.backoffMs.length + 1;
+      const backoff = ctx.backoffMs ?? this.opts.backoffMs;
+      const attempts = backoff.length + 1;
       const urls = [job.url, ...(ctx.mirrors ?? [])];
       let lastErr: Error = new Error('Download failed');
       for (let u = 0; u < urls.length; u++) {
@@ -393,7 +396,7 @@ export class DownloadManager {
         }
         const resume: Resume = { rangeOk: false };
         for (let i = 1; i <= attempts; i++) {
-          if (i > 1) await sleep(this.opts.backoffMs[i - 2], ctx.signal);
+          if (i > 1) await sleep(backoff[i - 2], ctx.signal);
           job.attempt = i;
           job.state = 'active';
           job.activeAt ??= new Date().toISOString();
