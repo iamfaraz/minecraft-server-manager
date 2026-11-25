@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
+import { CancelledError, downloads, withTask } from './downloads.js';
 import { fetchJson, downloadTo, exists, readJson, rmrf, run, which, writeJson, bad, notFound, HttpError, fmtBytes } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -167,7 +168,10 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
   const manifestFile = path.join(inst.dir, 'addons.json');
   const manifest = await readJson<Record<string, any>>(manifestFile, {});
   const updated: { from: string; to: string; version: string }[] = [];
+  const task = targets.length ? downloads.startTask({ label: `Update mods · ${inst.rec.name}`, serverId: inst.id, kind: 'mod-update', retry: () => applyUpdates(inst, fileNames, log).then(() => {}) }) : null;
+  let failed = 0;
   for (const t of targets) {
+    if (task?.signal.aborted) break;
     if (!t.latestFileUrl || !t.latestFileName) continue;
     const disabled = t.fileName.endsWith('.disabled');
     const newName = path.basename(t.latestFileName) + (disabled ? '.disabled' : '');
@@ -176,18 +180,24 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
     log?.(`Updating ${t.title || t.fileName} → ${t.latestVersion}`);
     progress(inst.id, t.fileName, 0, `Downloading ${t.latestVersion}`);
     try {
-      await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg));
+      await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg), { ...task!.ctx, label: newName });
       await fsp.rm(path.join(inst.root, dir, t.fileName), { force: true });
       await fsp.rename(`${dest}.new`, dest);
     } catch (e) {
       progress(inst.id, t.fileName, null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
       await fsp.rm(`${dest}.new`, { force: true });
+      failed++;
       continue;
     }
     progress(inst.id, t.fileName, 100, `Updated to ${t.latestVersion}`, { done: true, newFileName: newName });
     delete manifest[t.fileName.replace(/\.disabled$/, '')];
     manifest[newName.replace(/\.disabled$/, '')] = { projectId: t.projectId, versionId: t.latestVersionId, title: t.title, icon: t.icon, slug: t.slug };
     updated.push({ from: t.fileName, to: newName, version: t.latestVersion || '' });
+  }
+  if (task) {
+    if (task.signal.aborted) task.fail(new CancelledError());
+    else if (failed) task.fail(new Error(`${failed} of ${targets.length} updates failed`));
+    else task.done();
   }
   await writeJson(manifestFile, manifest);
   cache.delete(inst.id);
@@ -281,7 +291,9 @@ export async function buildClientPack(
       if (inst2) {
         log?.(`Downloading ${inst2.label}`);
         await fsp.mkdir(path.join(stage, 'installer'), { recursive: true });
-        await downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName), (pct, msg) => progress(inst.id, 'client-pack', pct, msg));
+        await withTask({ label: `Client mod pack · ${inst.rec.name}`, serverId: inst.id, kind: 'system', retry: () => buildClientPack(inst, opts, log).then(() => {}) }, (ctx) =>
+          downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName), (pct, msg) => progress(inst.id, 'client-pack', pct, msg), ctx),
+        );
         installerLabel = inst2.label;
       }
     }

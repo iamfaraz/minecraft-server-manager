@@ -1,6 +1,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { downloadCached, exists, fetchJson, findFile, run, PropertiesFile, type Progress } from '../util.js';
+import { downloadCached, downloadTo, exists, fetchJson, findFile, run, PropertiesFile, type Progress } from '../util.js';
+import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
 import { ensureJava } from '../versions/runtime.js';
 import {
   fabricServerJarUrl,
@@ -36,16 +37,36 @@ async function cleanOldBinaries(root: string): Promise<void> {
   }
 }
 
-async function runInstaller(javaBin: string, root: string, installer: string, onProgress: Progress): Promise<void> {
+/** Run a loader installer jar. Its own library downloads show as one step in the downloads panel; cancel kills it. */
+export async function runInstaller(javaBin: string, root: string, args: string[], onProgress: Progress, ctx: DownloadCtx | undefined, label: string): Promise<void> {
   onProgress(null, 'Running installer (this can take a few minutes)…');
-  const r = await run(javaBin, ['-jar', installer, '--installServer', '.'], {
-    cwd: root,
-    timeoutMs: 15 * 60_000,
-    onLine: (l) => {
-      if (/download|process|extract|install/i.test(l)) onProgress(null, l.slice(0, 160));
-    },
-  });
-  if (r.code !== 0) throw new Error(`Installer exited with code ${r.code}: ${(r.stderr || r.stdout).slice(-800)}`);
+  const track = ctx?.taskId ? downloads.trackProcess(ctx.taskId, `${label}: downloading libraries`) : null;
+  const signal = track?.signal ?? ctx?.signal;
+  let r;
+  try {
+    r = await run(javaBin, args, {
+      cwd: root,
+      timeoutMs: 15 * 60_000,
+      signal,
+      onLine: (l) => {
+        if (/download|process|extract|install/i.test(l)) onProgress(null, l.slice(0, 160));
+      },
+    });
+  } catch (e) {
+    track?.end(false, (e as Error).message);
+    if (signal?.aborted) throw new CancelledError();
+    throw e;
+  }
+  if (signal?.aborted) {
+    track?.end(false, 'Cancelled');
+    throw new CancelledError();
+  }
+  if (r.code !== 0) {
+    const msg = `Installer exited with code ${r.code}: ${(r.stderr || r.stdout).slice(-800)}`;
+    track?.end(false, msg);
+    throw new Error(msg);
+  }
+  track?.end(true);
 }
 
 async function resolveModloaderLaunch(root: string, group: 'minecraftforge/forge' | 'neoforged/neoforge'): Promise<LaunchSpec> {
@@ -73,11 +94,11 @@ export interface InstallResult {
 /**
  * Install or update the Java server binaries in `root`. Worlds, configs, plugins and mods are never touched.
  */
-export async function installJava(rec: ServerRecord, root: string, onProgress: Progress, initialProps?: Record<string, string>): Promise<InstallResult> {
+export async function installJava(rec: ServerRecord, root: string, onProgress: Progress, initialProps?: Record<string, string>, ctx?: DownloadCtx): Promise<InstallResult> {
   await fsp.mkdir(root, { recursive: true });
   const major = await javaMajorFor(rec);
   onProgress(null, `Preparing Java ${major} runtime`);
-  const rt = await ensureJava(major, onProgress);
+  const rt = await ensureJava(major, onProgress, ctx);
 
   const isUpdate = rec.installed;
   if (isUpdate) {
@@ -92,14 +113,14 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
   switch (rec.type) {
     case 'VANILLA': {
       downloadUrl = await vanillaServerUrl(rec.version);
-      const f = await downloadCached(downloadUrl, onProgress, `-vanilla-${rec.version}.jar`);
+      const f = await downloadCached(downloadUrl, onProgress, `-vanilla-${rec.version}.jar`, ctx);
       await fsp.copyFile(f, path.join(root, 'server.jar'));
       launch = { kind: 'jar', jar: 'server.jar' };
       break;
     }
     case 'PAPER': {
       downloadUrl = await paperDownloadUrl(rec.version);
-      const f = await downloadCached(downloadUrl, onProgress, `-paper-${rec.version}.jar`);
+      const f = await downloadCached(downloadUrl, onProgress, `-paper-${rec.version}.jar`, ctx);
       await fsp.copyFile(f, path.join(root, 'server.jar'));
       launch = { kind: 'jar', jar: 'server.jar' };
       break;
@@ -108,8 +129,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       downloadUrl = purpurDownloadUrl(rec.version);
       // Purpur's "latest" URL changes content; don't cache it across installs.
       const dest = path.join(root, 'server.jar');
-      const { downloadTo } = await import('../util.js');
-      await downloadTo(downloadUrl, dest, onProgress);
+      await downloadTo(downloadUrl, dest, onProgress, ctx);
       launch = { kind: 'jar', jar: 'server.jar' };
       break;
     }
@@ -117,7 +137,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       const info = await fabricServerJarUrl(rec.version);
       downloadUrl = info.url;
       loaderVersion = info.loader;
-      const f = await downloadCached(downloadUrl, onProgress, `-fabric-${rec.version}-${info.loader}.jar`);
+      const f = await downloadCached(downloadUrl, onProgress, `-fabric-${rec.version}-${info.loader}.jar`, ctx);
       await fsp.copyFile(f, path.join(root, 'fabric-server-launch.jar'));
       launch = { kind: 'jar', jar: 'fabric-server-launch.jar' };
       break;
@@ -126,10 +146,10 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       const info = await forgeInstallerUrl(rec.version);
       downloadUrl = info.url;
       loaderVersion = info.forgeVersion;
-      const f = await downloadCached(downloadUrl, onProgress, `-forge-${rec.version}-${info.forgeVersion}-installer.jar`);
+      const f = await downloadCached(downloadUrl, onProgress, `-forge-${rec.version}-${info.forgeVersion}-installer.jar`, ctx);
       const inst = path.join(root, 'forge-installer.jar');
       await fsp.copyFile(f, inst);
-      await runInstaller(rt.path, root, inst, onProgress);
+      await runInstaller(rt.path, root, ['-jar', inst, '--installServer', '.'], onProgress, ctx, 'Forge installer');
       await fsp.rm(inst, { force: true });
       await fsp.rm(path.join(root, 'forge-installer.jar.log'), { force: true });
       launch = await resolveModloaderLaunch(root, 'minecraftforge/forge');
@@ -139,10 +159,10 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       const info = await neoforgeInstallerUrl(rec.version);
       downloadUrl = info.url;
       loaderVersion = info.neoVersion;
-      const f = await downloadCached(downloadUrl, onProgress, `-neoforge-${info.neoVersion}-installer.jar`);
+      const f = await downloadCached(downloadUrl, onProgress, `-neoforge-${info.neoVersion}-installer.jar`, ctx);
       const inst = path.join(root, 'neoforge-installer.jar');
       await fsp.copyFile(f, inst);
-      await runInstaller(rt.path, root, inst, onProgress);
+      await runInstaller(rt.path, root, ['-jar', inst, '--installServer', '.'], onProgress, ctx, 'NeoForge installer');
       await fsp.rm(inst, { force: true });
       await fsp.rm(path.join(root, 'neoforge-installer.jar.log'), { force: true });
       launch = await resolveModloaderLaunch(root, 'neoforged/neoforge');
@@ -158,7 +178,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
   if (PLUGIN_TYPES.includes(rec.type)) await fsp.mkdir(path.join(root, 'plugins'), { recursive: true });
   if (MOD_TYPES.includes(rec.type)) await fsp.mkdir(path.join(root, 'mods'), { recursive: true });
 
-  if (rec.geyser) await installGeyser(rec, root, onProgress);
+  if (rec.geyser) await installGeyser(rec, root, onProgress, ctx);
 
   onProgress(100, 'Install complete');
   return {
@@ -194,20 +214,20 @@ export function extensionDir(rec: ServerRecord): 'plugins' | 'mods' | null {
 }
 
 /** Download Geyser + Floodgate (and Fabric API on Fabric) into the extension directory. */
-export async function installGeyser(rec: ServerRecord, root: string, onProgress: Progress): Promise<void> {
+export async function installGeyser(rec: ServerRecord, root: string, onProgress: Progress, ctx?: DownloadCtx): Promise<void> {
   const dir = extensionDir(rec);
   if (!dir || rec.type === 'FORGE') throw new Error('Geyser is supported on Paper, Purpur, Fabric and NeoForge servers');
   const platform = dir === 'plugins' ? 'spigot' : rec.type === 'NEOFORGE' ? 'neoforge' : 'fabric';
   const target = path.join(root, dir);
   await fsp.mkdir(target, { recursive: true });
   const base = 'https://download.geysermc.org/v2/projects';
-  const { downloadTo } = await import('../util.js');
   onProgress(null, 'Downloading Geyser');
-  await downloadTo(`${base}/geyser/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `Geyser-${platform}.jar`), onProgress);
+  await downloadTo(`${base}/geyser/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `Geyser-${platform}.jar`), onProgress, ctx);
   onProgress(null, 'Downloading Floodgate');
   try {
-    await downloadTo(`${base}/floodgate/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `floodgate-${platform}.jar`), onProgress);
+    await downloadTo(`${base}/floodgate/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `floodgate-${platform}.jar`), onProgress, ctx);
   } catch (e) {
+    if (e instanceof CancelledError) throw e;
     onProgress(null, `Floodgate not available for ${platform} (${(e as Error).message}); Geyser installed without it`);
   }
   if (rec.type === 'FABRIC') {
@@ -216,7 +236,7 @@ export async function installGeyser(rec: ServerRecord, root: string, onProgress:
       `https://api.modrinth.com/v2/project/fabric-api/version?loaders=${encodeURIComponent('["fabric"]')}&game_versions=${encodeURIComponent(JSON.stringify([rec.version]))}`,
     );
     const file = versions?.[0]?.files?.find((f: any) => f.primary) || versions?.[0]?.files?.[0];
-    if (file?.url) await downloadTo(file.url, path.join(target, file.filename || 'fabric-api.jar'), onProgress);
+    if (file?.url) await downloadTo(file.url, path.join(target, file.filename || 'fabric-api.jar'), onProgress, ctx);
   }
 }
 

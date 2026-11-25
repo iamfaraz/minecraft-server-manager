@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import * as tar from 'tar';
 import { config } from '../config.js';
+import { downloads, type DownloadCtx } from '../downloads.js';
 import { downloadCached, exists, findFile, run, which, type Progress } from '../util.js';
 
 export interface JavaRuntime {
@@ -77,13 +78,22 @@ function adoptiumUrl(major: number): string {
 }
 
 /** Ensure a Java runtime for `major` exists, downloading from Adoptium when needed. */
-export async function ensureJava(major: number, onProgress?: Progress): Promise<JavaRuntime> {
+export async function ensureJava(major: number, onProgress?: Progress, ctx?: DownloadCtx): Promise<JavaRuntime> {
   if (!detected.size) await listJavaRuntimes();
   const have = detected.get(major);
   if (have) return have;
   onProgress?.(null, `Java ${major} not found — downloading from Adoptium`);
   const dest = path.join(config.runtimesDir, 'java', String(major));
-  const archive = await downloadCached(adoptiumUrl(major), onProgress, `-jre${major}.tar.gz`);
+  // Outside an install task (e.g. on start) the runtime download gets a task of its own.
+  const own = ctx ? null : downloads.startTask({ label: `Java ${major} runtime`, kind: 'runtime' });
+  let archive: string;
+  try {
+    archive = await downloadCached(adoptiumUrl(major), onProgress, `-jre${major}.tar.gz`, { ...(ctx ?? own!.ctx), label: `Java ${major} runtime` });
+    own?.done();
+  } catch (e) {
+    own?.fail(e as Error);
+    throw e;
+  }
   await fsp.rm(dest, { recursive: true, force: true });
   await fsp.mkdir(dest, { recursive: true });
   onProgress?.(null, `Extracting Java ${major}`);

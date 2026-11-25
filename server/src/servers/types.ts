@@ -10,6 +10,7 @@ export type BedrockTransport = 'raknet' | 'nethernet';
 export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'FORGE', 'NEOFORGE'];
 export const PLUGIN_TYPES: ServerType[] = ['PAPER', 'PURPUR'];
 export const MOD_TYPES: ServerType[] = ['FABRIC', 'FORGE', 'NEOFORGE'];
+export const TYPE_NAMES: Record<ServerType, string> = { VANILLA: 'Vanilla', PAPER: 'Paper', PURPUR: 'Purpur', FABRIC: 'Fabric', FORGE: 'Forge', NEOFORGE: 'NeoForge', BEDROCK: 'Bedrock' };
 
 export type LaunchSpec =
   | { kind: 'jar'; jar: string }

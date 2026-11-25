@@ -12,7 +12,8 @@ import { ServerInstance } from './instance.js';
 import { pingBedrock, pingJava, probeNetherNet } from './status.js';
 import { heldPorts, portNeeds, slotSpan, type PortConflict, type PortNeed, type PortSlot } from './ports.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
-import { JAVA_TYPES } from './types.js';
+import { JAVA_TYPES, TYPE_NAMES } from './types.js';
+import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
 
@@ -449,11 +450,16 @@ export class ServerManager {
     return inst.summary();
   }
 
+  private installTask(inst: ServerInstance, label: string) {
+    return downloads.startTask({ label: `${label} · ${inst.rec.name}`, serverId: inst.id, kind: 'server-install', retry: () => this.reinstall(inst.id) });
+  }
+
   private async installAndMaybeStart(inst: ServerInstance, props: Record<string, string> | undefined, source: ServerInstance | null, backupId: string | undefined, startAfter: boolean, importId?: string) {
     inst.setState('installing');
     inst.setProgress(null, 'Preparing');
+    const task = this.installTask(inst, `Install ${TYPE_NAMES[inst.rec.type]} ${inst.rec.version}`);
     try {
-      await this.doInstall(inst, props);
+      await this.doInstall(inst, props, task.ctx);
       if (importId) {
         inst.setProgress(null, 'Copying imported world');
         await applyImport(importId, inst.root, inst.rec.edition, inst.rec.levelName);
@@ -462,23 +468,25 @@ export class ServerManager {
       await inst.save();
       inst.install = null;
       bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Ready', done: true });
+      task.done();
       inst.setState('stopped');
       if (startAfter) await this.startServer(inst.id);
     } catch (e) {
-      const msg = (e as Error).message;
-      inst.pushLog(`[Blockhost] Install failed: ${msg}`);
+      task.fail(e as Error);
+      const msg = e instanceof CancelledError ? 'Install cancelled' : (e as Error).message;
+      inst.pushLog(e instanceof CancelledError ? '[Blockhost] Install cancelled' : `[Blockhost] Install failed: ${msg}`);
       bus.publish({ type: 'server.progress', id: inst.id, pct: null, message: msg, done: true, error: msg });
       inst.setState('error', msg);
     }
   }
 
-  private async doInstall(inst: ServerInstance, props?: Record<string, string>) {
+  private async doInstall(inst: ServerInstance, props?: Record<string, string>, ctx?: DownloadCtx) {
     const onProgress = (p: number | null, m: string) => inst.setProgress(p, m);
     if (inst.rec.edition === 'java') {
-      const r = await installJava(inst.rec, inst.root, onProgress, props);
+      const r = await installJava(inst.rec, inst.root, onProgress, props, ctx);
       inst.rec.build = r.build;
     } else {
-      const r = await installBedrock(inst.rec, inst.root, onProgress, props);
+      const r = await installBedrock(inst.rec, inst.root, onProgress, props, ctx);
       inst.rec.build = r.build;
       inst.rec.version = r.version;
     }
@@ -584,6 +592,7 @@ export class ServerManager {
     const newType = opts.type || rec.type;
     if ((newType === 'BEDROCK') !== (rec.edition === 'bedrock')) throw bad('Cannot switch between Java and Bedrock in place; create a new server and import the world.');
     const wasRunning = inst.isActive;
+    const task = this.installTask(inst, `Install ${TYPE_NAMES[newType]} ${opts.version.trim()}`);
     (async () => {
       try {
         if (wasRunning) {
@@ -607,7 +616,7 @@ export class ServerManager {
           // Re-evaluate auto-ness: if user had auto before keep auto; otherwise keep their explicit choice
         }
         try {
-          await this.doInstall(inst);
+          await this.doInstall(inst, undefined, task.ctx);
         } catch (e) {
           rec.version = prev.version;
           rec.type = prev.type;
@@ -617,13 +626,15 @@ export class ServerManager {
         rec.installed = true;
         await inst.save();
         inst.install = null;
+        task.done();
         bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Updated', done: true });
         inst.setState('stopped');
         inst.pushLog(`[Blockhost] Now on ${rec.type} ${rec.version}`);
         if (wasRunning) await this.startServer(inst.id);
       } catch (e) {
-        const msg = (e as Error).message;
-        inst.pushLog(`[Blockhost] Update failed: ${msg}`);
+        task.fail(e as Error);
+        const msg = e instanceof CancelledError ? 'Install cancelled' : (e as Error).message;
+        inst.pushLog(e instanceof CancelledError ? '[Blockhost] Install cancelled' : `[Blockhost] Update failed: ${msg}`);
         bus.publish({ type: 'server.progress', id: inst.id, pct: null, message: msg, done: true, error: msg });
         inst.setState(rec.installed ? 'stopped' : 'error', msg);
         inst.errorDetail = msg;

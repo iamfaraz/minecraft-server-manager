@@ -17,6 +17,7 @@ import { serverRoutes } from './routes/servers.js';
 import { miscRoutes } from './routes/misc.js';
 import { contentRoutes } from './routes/content.js';
 import { wsRoutes } from './ws.js';
+import { downloadRoutes } from './routes/downloads.js';
 import { downloads, sweepPartials, wireBus } from './downloads.js';
 import { bus } from './events.js';
 
@@ -42,6 +43,7 @@ async function main() {
   await app.register(serverRoutes);
   await app.register(miscRoutes);
   await app.register(contentRoutes);
+  await app.register(downloadRoutes);
   await app.register(wsRoutes);
 
   if (fs.existsSync(path.join(config.webDist, 'index.html'))) {

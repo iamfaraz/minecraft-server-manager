@@ -499,3 +499,20 @@ export function wireBus(m: DownloadManager, bus: { publish(ev: any): void }): vo
   });
   m.on('task', (task) => bus.publish({ type: 'download.changed', task: { ...task, jobIds: [...task.jobIds] } }));
 }
+
+/** Run `fn` as one download task: its downloads are grouped, and the task ends done or failed with it. */
+export async function withTask<T>(
+  t: { label: string; serverId?: string; kind: OwnerKind; retry?: () => Promise<void> },
+  fn: (ctx: DownloadCtx, task: TaskHandle) => Promise<T>,
+  m: DownloadManager = downloads,
+): Promise<T> {
+  const task = m.startTask(t);
+  try {
+    const r = await fn(task.ctx, task);
+    task.done();
+    return r;
+  } catch (e) {
+    task.fail(e as Error);
+    throw e;
+  }
+}

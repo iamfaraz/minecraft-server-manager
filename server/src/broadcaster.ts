@@ -4,6 +4,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { config } from './config.js';
 import { bus } from './events.js';
+import { withTask } from './downloads.js';
 import { downloadTo, exists, rmrf, stripAnsi, PropertiesFile, HttpError } from './util.js';
 import { ensureJava } from './versions/runtime.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -145,7 +146,9 @@ class BroadcasterService {
     r.state = 'installing';
     this.publish(id);
     this.push(id, `[Blockhost] Downloading MCXboxBroadcast ${MCXB_VERSION}`);
-    await downloadTo(`https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar`, local);
+    const url = `https://github.com/MCXboxBroadcast/Broadcaster/releases/download/${MCXB_VERSION}/MCXboxBroadcastStandalone.jar`;
+    const get = (): Promise<void> => withTask({ label: 'Xbox broadcaster', kind: 'system', serverId: id, retry: get }, (ctx) => downloadTo(url, local, undefined, ctx));
+    await get();
     return local;
   }
 

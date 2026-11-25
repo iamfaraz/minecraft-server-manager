@@ -195,3 +195,12 @@ test('sweepPartials removes stale .part files', async () => {
   assert.equal(await sweepPartials(d), 2);
   assert.deepEqual(await fsp.readdir(d), ['keep.jar']);
 });
+
+test('withTask marks task done or failed', async () => {
+  const m = mk();
+  const { withTask } = await import('./downloads.js');
+  await withTask({ label: 'ok', kind: 'addon' }, (ctx) => m.download(`${fx.url}/ok/12`, dest(), ctx), m);
+  await assert.rejects(withTask({ label: 'bad', kind: 'addon' }, (ctx) => m.download(`${fx.url}/status/403`, dest(), ctx), m));
+  const states = Object.fromEntries(m.snapshot().tasks.map((t) => [t.label, t.state]));
+  assert.deepEqual(states, { ok: 'done', bad: 'failed' });
+});

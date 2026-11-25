@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import { config } from './config.js';
 import { bus } from './events.js';
 import { getAppConfig, saveAppConfig } from './store.js';
+import { withTask } from './downloads.js';
 import { downloadTo, exists, stripAnsi, which, HttpError } from './util.js';
 import type { ServerRecord } from './servers/types.js';
 
@@ -128,7 +129,8 @@ class PlayitService {
     const os = config.platform === 'darwin' ? 'darwin' : 'linux';
     const arch = config.arch === 'arm64' ? (os === 'darwin' ? 'arm64' : 'aarch64') : 'amd64';
     const url = `https://github.com/playit-cloud/playit-agent/releases/download/${PLAYIT_VERSION}/playit-${os}-${arch}`;
-    await downloadTo(url, local, (_p, m) => this.pushLog(`[Blockhost] ${m}`));
+    const get = (): Promise<void> => withTask({ label: 'playit agent', kind: 'system', retry: get }, (ctx) => downloadTo(url, local, (_p, m) => this.pushLog(`[Blockhost] ${m}`), ctx));
+    await get();
     await fsp.chmod(local, 0o755);
     return local;
   }

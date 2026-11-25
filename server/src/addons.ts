@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
+import { withTask } from './downloads.js';
 import { downloadTo, exists, fetchJson, normalizePerms, parseJsonLoose, readJson, rmrf, safeJoin, writeJson, bad, HttpError } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -137,7 +138,15 @@ export async function installModrinth(inst: ServerInstance, projectId: string, d
   const dest = addonPath(inst, path.basename(file.filename));
   log?.(`Downloading ${project.title} ${v.version_number}`);
   await fsp.mkdir(path.join(inst.root, dir), { recursive: true });
-  await downloadTo(file.url, dest, (pct, msg) => prog(pct, msg));
+  try {
+    await withTask(
+      { label: `Install ${project.title} · ${inst.rec.name}`, serverId: inst.id, kind: 'addon', retry: () => installModrinth(inst, projectId, depth, log).then(() => {}) },
+      (ctx) => downloadTo(file.url, dest, (pct, msg) => prog(pct, msg), { ...ctx, sha512: file.hashes?.sha512, sha1: file.hashes?.sha512 ? undefined : file.hashes?.sha1, label: path.basename(file.filename) }),
+    );
+  } catch (e) {
+    prog(null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
+    throw e;
+  }
   manifest[path.basename(file.filename)] = { projectId: project.id, versionId: v.id, title: project.title, icon: project.icon_url, slug: project.slug };
   await writeJson(manifestFile(inst), manifest);
   const installed = [project.title];
