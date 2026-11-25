@@ -27,6 +27,31 @@ async function request<T>(method: string, url: string, body?: unknown, init: Req
   return data as T;
 }
 
+/** Upload with progress (fetch cannot report upload progress). */
+export function uploadWithProgress<T>(url: string, file: File, onProgress: (pct: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    xhr.onerror = () => reject(new ApiError(0, 'Upload failed: network error'));
+    xhr.onload = () => {
+      let data: any = null;
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        data = { error: xhr.responseText };
+      }
+      if (xhr.status === 401) window.dispatchEvent(new CustomEvent('mcsm:unauthorized'));
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+      else reject(new ApiError(xhr.status, data?.error || xhr.statusText || 'Upload failed', data || {}));
+    };
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    xhr.send(fd);
+  });
+}
+
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
   post: <T>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),

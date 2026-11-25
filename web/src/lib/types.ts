@@ -82,6 +82,7 @@ export interface ServerSummary {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  modpack?: ModpackRecord;
   /** Gave up its ports while stopped; it gets ports again at the next start. */
   portsReleased?: boolean;
   backup: { schedule: BackupSchedule; keep: number; scope: BackupScope };
@@ -300,6 +301,39 @@ export interface UpdateCheck {
   current: { type: string; version: string; build?: string; installedAt?: string };
   build: { available: boolean; unknown?: boolean; label: string } | null;
   version: { available: boolean; latest: string | null; label: string };
+  modpack?: PackUpdateInfo | null;
+}
+
+/* ---- modpacks ---- */
+export type SkipReason = 'pack-env' | 'modrinth-server-unsupported' | 'mod-metadata-client' | 'admin';
+export interface PackLink { projectId: string; slug: string; title: string; icon?: string; versionId: string; versionNumber: string; confidence: 'exact' | 'name-version' }
+export interface StagedPack {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  index: { name: string; versionId: string; summary?: string };
+  loader: { type: 'VANILLA' | 'FABRIC' | 'QUILT' | 'FORGE' | 'NEOFORGE'; mc: string; loaderVersion?: string };
+  link: PackLink | null;
+  files: { path: string; size: number; skip: boolean; reason?: SkipReason; projectId?: string }[];
+  overrideCount: number;
+  sidesChecked?: boolean;
+  downloadBytes: number;
+}
+export interface PackHit { projectId: string; slug: string; title: string; icon?: string; downloads: number; mcVersions: string[]; loaders: string[] }
+export interface PackVersion { id: string; name: string; versionNumber: string; type: string; mc: string[]; loaders: string[]; date: string; fileSize: number }
+export interface PackUpdateInfo { available: boolean; latest?: { versionId: string; versionNumber: string; mc: string; loaders: string[] }; changesMcVersion: boolean }
+export interface PackUpdateResult { added: number; updated: number; removed: number; configsUpdated: number; configsKept: string[]; adminKept: string[]; mcChanged: boolean; from: string; to: string }
+export interface ModpackRecord {
+  source: 'modrinth' | 'upload';
+  projectId?: string;
+  slug?: string;
+  title: string;
+  icon?: string;
+  versionId?: string;
+  versionNumber: string;
+  files: { path: string; sha1: string; projectId?: string; adminOwned?: boolean }[];
+  overrides: { path: string }[];
+  updates: { mode: 'notify' | 'ignore'; skippedVersionId?: string };
 }
 
 export interface StorageOverview {

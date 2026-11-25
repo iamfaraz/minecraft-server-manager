@@ -9,6 +9,7 @@ import { useWsEvent } from '../../lib/ws';
 import { Card, EmptyState, Stat } from '../../components/ui';
 import { TYPE_LABEL } from '../../lib/types';
 import { WorldControls } from './WorldControls';
+import { JoinCard } from '../../components/JoinCard';
 
 function Chart({ data, keyName, color, unit, max }: { data: StatsSample[]; keyName: 'cpu' | 'memMb'; color: string; unit: string; max?: number }) {
   if (data.length < 2) return <div className="flex h-44 items-center justify-center text-sm text-muted">Collecting samples…</div>;
@@ -52,6 +53,7 @@ export function Overview({ s }: { s: ServerSummary }) {
 
   return (
     <div className="fade-up space-y-5">
+      <JoinCard s={s} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Uptime" value={uptime} sub={running ? 'online' : s.lastExit ? `stopped ${timeAgo(s.lastExit.at)}` : 'offline'} icon={Clock} tone="accent" />
         <Stat label="Players" value={`${s.players.length}${s.ping?.max ? ` / ${s.ping.max}` : ''}`} sub={s.ping?.latencyMs != null ? `${s.ping.latencyMs} ms ping` : s.transport === 'nethernet' ? 'NetherNet: no player count in ping' : 'no ping yet'} icon={Users} tone="violet" />

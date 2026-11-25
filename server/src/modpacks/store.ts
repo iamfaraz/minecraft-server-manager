@@ -31,6 +31,8 @@ export interface StagedPack {
   link: PackLink | null;
   files: StagedFile[];
   overrideCount: number;
+  /** False when Modrinth could not be asked which mods run on servers (the install still checks each jar). */
+  sidesChecked: boolean;
   downloadBytes: number;
 }
 
@@ -48,7 +50,11 @@ async function build(id: string, fileName: string, link?: PackLink | null): Prom
   const { index, overrides } = readMrpack(file);
   const loader = loaderFromDeps(index.dependencies);
   if (link === undefined) link = await identifyPack(await fileHash(file, 'sha1'), index).catch(() => null);
-  const sides = await projectSides(index.files.map((f) => f.hashes.sha1).filter(Boolean)).catch(() => ({}) as Awaited<ReturnType<typeof projectSides>>);
+  let sidesChecked = true;
+  const sides = await projectSides(index.files.map((f) => f.hashes.sha1).filter(Boolean)).catch(() => {
+    sidesChecked = false;
+    return {} as Awaited<ReturnType<typeof projectSides>>;
+  });
   const decisions = decideSkips(
     index.files.map((f) => ({ path: f.path, env: f.env, projectServerSide: sides[f.hashes.sha1]?.serverSide })),
     {},
@@ -63,6 +69,7 @@ async function build(id: string, fileName: string, link?: PackLink | null): Prom
     link,
     files,
     overrideCount: overrides.length,
+    sidesChecked,
     downloadBytes: files.filter((f) => !f.skip).reduce((a, f) => a + f.size, 0),
   };
   await writeJson(metaFile(id), meta);

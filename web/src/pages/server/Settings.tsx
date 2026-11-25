@@ -201,6 +201,7 @@ export function Settings({ s }: { s: ServerSummary }) {
 
         {java && s.geyser && <ConsoleBroadcast s={s} />}
 
+        {s.modpack && <ModpackSettings s={s} />}
         <Card title="Scheduled backups">
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Frequency">
@@ -322,5 +323,52 @@ export function Settings({ s }: { s: ServerSummary }) {
         busy={remove.isPending}
       />
     </div>
+  );
+}
+
+function ModpackSettings({ s }: { s: ServerSummary }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [confirm, setConfirm] = useState(false);
+  const mp = s.modpack!;
+  const post = useMutation({
+    mutationFn: ({ path, body }: { path: string; body?: object }) => api.post(`/api/servers/${s.id}/modpack/${path}`, body ?? {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  return (
+    <Card title="Modpack">
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          Follows <span className="text-ink">{mp.title}</span> <span className="font-mono text-ink">{mp.versionNumber}</span>
+          {mp.projectId ? ' from Modrinth' : ' (uploaded pack)'}.
+        </p>
+        <Toggle
+          checked={mp.updates.mode !== 'ignore'}
+          disabled={!mp.projectId || post.isPending}
+          onChange={(v) => post.mutate({ path: 'mode', body: { mode: v ? 'notify' : 'ignore' } })}
+          label="Check for modpack updates"
+          description={mp.projectId ? 'Shown in Versions → Updates when you check.' : "This pack isn't linked to Modrinth."}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+          <div>
+            <p className="text-sm font-medium">Detach from modpack</p>
+            <p className="text-xs text-muted">Keeps every file. Pack updates stop and you manage versions and mods yourself.</p>
+          </div>
+          <button className="btn-secondary btn-sm" onClick={() => setConfirm(true)}>
+            Detach
+          </button>
+        </div>
+      </div>
+      <ConfirmModal
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        onConfirm={() => post.mutate({ path: 'detach' }, { onSuccess: () => (setConfirm(false), toast.success('Detached from the modpack')) })}
+        title={`Detach "${s.name}" from ${mp.title}?`}
+        body="The server keeps its mods and configs but no longer follows the pack: no pack updates, and the loader version is no longer pinned. The How to join card goes away. This cannot be undone."
+        confirmLabel="Detach"
+        busy={post.isPending}
+      />
+    </Card>
   );
 }
