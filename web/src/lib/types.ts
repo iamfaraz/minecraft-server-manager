@@ -205,6 +205,8 @@ export interface DownloadJob {
   attempt: number;
   indeterminate?: boolean;
   startedAt: string;
+  /** When bytes first moved (startedAt is when it was queued). */
+  activeAt?: string;
   finishedAt?: string;
 }
 export interface DownloadTask {

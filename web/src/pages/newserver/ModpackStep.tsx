@@ -225,14 +225,14 @@ function SkipList({ files, isSkipped, onToggle }: { files: StagedPack['files']; 
     <div className="rounded-xl border border-line">
       <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen((o) => !o)}>
         {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-        Mods ({files.length}) · {skipped} skipped
-        <span className="ml-auto text-xs text-muted">tick to skip, untick to install</span>
+        Mods ({files.length}) · {files.length - skipped} to install · {skipped} skipped
+        <span className="ml-auto text-xs text-muted">ticked mods are installed</span>
       </button>
       {open && (
         <ul className="divide-y divide-line/60 border-t border-line">
           {files.map((f) => (
             <li key={f.path} className="flex items-start gap-3 px-3 py-2 text-sm">
-              <input type="checkbox" className="mt-1 accent-emerald-400" checked={isSkipped(f)} onChange={(e) => onToggle(f.path, e.target.checked)} />
+              <input type="checkbox" className="mt-1 accent-emerald-400" checked={!isSkipped(f)} onChange={(e) => onToggle(f.path, !e.target.checked)} />
               <span className="min-w-0">
                 <span className="block truncate font-mono text-xs">{fileName(f.path)}</span>
                 <span className="block text-xs text-muted">{isSkipped(f) ? (f.reason && f.skip ? `Skipped because ${REASON[f.reason]}` : 'Skipped by you') : f.skip ? 'Installing anyway' : 'Will be installed'}</span>

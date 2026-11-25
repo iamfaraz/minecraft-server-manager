@@ -3,7 +3,8 @@ import { Check, ChevronDown, ChevronRight, Download, Loader2, RotateCcw, X } fro
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDownloads } from '../hooks/useDownloads';
-import { fmtBytes, fmtDuration, timeAgo } from '../lib/format';
+import { fmtBytes, fmtDuration, fmtSpeed, timeAgo } from '../lib/format';
+import { useNow, useSpeedUnit, type SpeedUnit } from '../hooks/useSpeedUnit';
 import type { DownloadJob, DownloadTask } from '../lib/types';
 
 const isLive = (j: DownloadJob) => j.state === 'queued' || j.state === 'active' || j.state === 'verifying';
@@ -16,30 +17,48 @@ function Bar({ pct, indeterminate }: { pct: number | null; indeterminate?: boole
   );
 }
 
-function JobRow({ j }: { j: DownloadJob }) {
+function JobRow({ j, unit, now }: { j: DownloadJob; unit: SpeedUnit; now: number }) {
   const pct = j.bytesTotal ? Math.round((j.bytesDone / j.bytesTotal) * 100) : null;
-  const eta = j.speedBps > 0 && j.bytesTotal ? fmtDuration(((j.bytesTotal - j.bytesDone) / j.speedBps) * 1000) : null;
+  const left = j.bytesTotal != null ? Math.max(0, j.bytesTotal - j.bytesDone) : null;
+  const began = j.activeAt ?? j.startedAt;
+  const elapsed = (j.finishedAt ? Date.parse(j.finishedAt) : now) - Date.parse(began);
+  const eta = j.speedBps > 0 && left != null ? fmtDuration((left / j.speedBps) * 1000) : null;
+  const moving = j.state === 'active' && !j.indeterminate;
+  const status =
+    j.state === 'queued' ? 'queued' : j.state === 'verifying' ? 'checking' : j.state === 'cancelled' ? 'cancelled' : j.state === 'failed' ? 'failed' : j.indeterminate && j.state === 'active' ? 'working…' : pct != null ? `${pct}%` : '';
   return (
     <div className="space-y-1 py-1.5">
       <div className="flex items-center gap-2 text-xs">
         <span className="min-w-0 flex-1 truncate font-medium text-ink/90">{j.label}</span>
-        <span className="shrink-0 tabular-nums text-muted">
-          {j.state === 'queued'
-            ? 'queued'
-            : j.state === 'verifying'
-              ? 'checking'
-              : j.indeterminate
-                ? 'working…'
-                : `${fmtBytes(j.bytesDone)}${j.bytesTotal ? ` / ${fmtBytes(j.bytesTotal)}` : ''}${j.speedBps ? ` · ${fmtBytes(j.speedBps)}/s` : ''}${eta ? ` · ${eta}` : ''}`}
-        </span>
+        <span className={clsx('shrink-0 tabular-nums', j.state === 'failed' ? 'text-rose-300' : 'text-muted')}>{status}</span>
       </div>
-      {j.state !== 'queued' && <Bar pct={pct} indeterminate={j.indeterminate || j.state === 'verifying'} />}
+      {j.state !== 'queued' && j.state !== 'done' && <Bar pct={pct} indeterminate={j.indeterminate || j.state === 'verifying'} />}
+      {moving && (
+        <div className="grid grid-cols-2 gap-x-3 text-[11px] tabular-nums text-muted">
+          <span>
+            {fmtBytes(j.bytesDone)}
+            {j.bytesTotal != null && ` of ${fmtBytes(j.bytesTotal)}`}
+          </span>
+          <span className="text-right">{j.speedBps ? fmtSpeed(j.speedBps, unit) : '—'}</span>
+          <span>{left != null ? `${fmtBytes(left)} left` : 'size unknown'}</span>
+          <span className="text-right">
+            {fmtDuration(Math.max(0, elapsed))} elapsed{eta ? ` · ${eta} left` : ''}
+          </span>
+        </div>
+      )}
+      {!moving && j.state !== 'queued' && j.bytesDone > 0 && (
+        <p className="text-[11px] tabular-nums text-muted">
+          {fmtBytes(j.bytesDone)}
+          {j.bytesTotal != null && j.bytesDone !== j.bytesTotal && ` of ${fmtBytes(j.bytesTotal)}`}
+          {j.finishedAt && j.state === 'done' && ` · took ${fmtDuration(Math.max(0, elapsed))}`}
+        </p>
+      )}
       {j.error && <p className="text-[11px] text-amber-300/90">{j.error}</p>}
     </div>
   );
 }
 
-function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: DownloadJob[]; onCancel: () => void; onRetry: () => void }) {
+function TaskCard({ t, jobs, onCancel, onRetry, unit, now }: { t: DownloadTask; jobs: DownloadJob[]; onCancel: () => void; onRetry: () => void; unit: SpeedUnit; now: number }) {
   const [open, setOpen] = useState(false);
   // Large tasks outlive the job history, so counts come from the task when the server sends them.
   const total = t.files?.total ?? jobs.length;
@@ -50,6 +69,7 @@ function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: Downl
   const retrying = jobs.filter((j) => isLive(j) && j.attempt > 1).length;
   const bytesDone = t.bytesFinished !== undefined ? t.bytesFinished + jobs.filter((j) => !j.finishedAt).reduce((a, j) => a + j.bytesDone, 0) : jobs.reduce((a, j) => a + j.bytesDone, 0);
   const bytesTotal = jobs.length === total ? jobs.reduce((a, j) => a + (j.bytesTotal ?? 0), 0) : 0;
+  const speed = jobs.filter(isLive).reduce((a, j) => a + j.speedBps, 0);
   const shown = many && !open ? [] : live ? jobs.filter(isLive).concat(jobs.filter((j) => !isLive(j))) : jobs;
   return (
     <div className="rounded-xl border border-line bg-white/[0.02] px-3 py-2.5">
@@ -78,8 +98,10 @@ function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: Downl
         <button className="mt-1.5 flex w-full items-center gap-1.5 text-left text-xs text-muted hover:text-ink" onClick={() => setOpen((o) => !o)}>
           {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           <span className="tabular-nums">
-            {total} files · {done} / {total} · {fmtBytes(bytesDone)}
+            {done} / {total} files · {fmtBytes(bytesDone)}
             {bytesTotal ? ` / ${fmtBytes(bytesTotal)}` : ''}
+            {live && speed > 0 && ` · ${fmtSpeed(speed, unit)}`}
+            {` · ${fmtDuration(Math.max(0, (t.finishedAt ? Date.parse(t.finishedAt) : now) - Date.parse(t.startedAt)))}`}
           </span>
           {failed > 0 && <span className="text-rose-300">· {failed} failed</span>}
           {retrying > 0 && <span className="text-amber-300">· {retrying} retrying</span>}
@@ -89,7 +111,7 @@ function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: Downl
       {(live || open || !many) && shown.length > 0 && (
         <div className="mt-1 divide-y divide-white/5">
           {(live && !open ? shown.filter(isLive) : shown).map((j) => (
-            <JobRow key={j.id} j={j} />
+            <JobRow key={j.id} j={j} unit={unit} now={now} />
           ))}
         </div>
       )}
@@ -125,6 +147,8 @@ export function DownloadsButton({ className }: { className?: string }) {
     };
   }, [open]);
 
+  const [unit, setUnit] = useSpeedUnit();
+  const now = useNow(open && d.active > 0);
   const byId = new Map(d.jobs.map((j) => [j.id, j]));
   const taskJobs = (t: DownloadTask) => t.jobIds.map((id) => byId.get(id)).filter((j): j is DownloadJob => !!j);
   const sorted = [...d.tasks].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -146,6 +170,13 @@ export function DownloadsButton({ className }: { className?: string }) {
           <header className="flex items-center justify-between border-b border-line px-4 py-3">
             <h3 className="text-sm font-semibold">Downloads</h3>
             <div className="flex items-center gap-1">
+              <div className="mr-1 flex rounded-lg border border-line p-0.5 text-[11px]" title="Speed unit">
+                {(['bytes', 'bits'] as const).map((u) => (
+                  <button key={u} className={clsx('rounded-md px-1.5 py-0.5', unit === u ? 'bg-white/10 text-ink' : 'text-muted hover:text-ink')} onClick={() => setUnit(u)}>
+                    {u === 'bytes' ? 'MB/s' : 'Mb/s'}
+                  </button>
+                ))}
+              </div>
               {recent.length > 0 && (
                 <button className="btn-ghost btn-sm text-xs" onClick={() => d.clearHistory()}>
                   Clear history
@@ -162,7 +193,7 @@ export function DownloadsButton({ className }: { className?: string }) {
               <section className="space-y-2">
                 <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Active</p>
                 {active.map((t) => (
-                  <TaskCard key={t.id} t={t} jobs={taskJobs(t)} onCancel={() => d.cancelTask(t.id)} onRetry={() => d.retryTask(t.id)} />
+                  <TaskCard key={t.id} t={t} jobs={taskJobs(t)} onCancel={() => d.cancelTask(t.id)} onRetry={() => d.retryTask(t.id)} unit={unit} now={now} />
                 ))}
               </section>
             )}
@@ -170,7 +201,7 @@ export function DownloadsButton({ className }: { className?: string }) {
               <section className="space-y-2">
                 <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Recent</p>
                 {recent.map((t) => (
-                  <TaskCard key={t.id} t={t} jobs={taskJobs(t)} onCancel={() => d.cancelTask(t.id)} onRetry={() => d.retryTask(t.id)} />
+                  <TaskCard key={t.id} t={t} jobs={taskJobs(t)} onCancel={() => d.cancelTask(t.id)} onRetry={() => d.retryTask(t.id)} unit={unit} now={now} />
                 ))}
               </section>
             )}

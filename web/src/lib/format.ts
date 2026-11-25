@@ -6,6 +6,16 @@ export function fmtBytes(n: number | undefined | null): string {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
+/** Speed in bytes per second, shown as MB/s-style (unit 'bytes') or Mb/s-style (unit 'bits', decimal like ISPs). */
+export function fmtSpeed(bps: number, unit: 'bytes' | 'bits'): string {
+  if (unit === 'bytes') return `${fmtBytes(bps)}/s`;
+  const b = bps * 8;
+  if (b < 1e3) return `${Math.round(b)} b/s`;
+  if (b < 1e6) return `${(b / 1e3).toFixed(1)} Kb/s`;
+  if (b < 1e9) return `${(b / 1e6).toFixed(1)} Mb/s`;
+  return `${(b / 1e9).toFixed(2)} Gb/s`;
+}
+
 export function fmtMb(mb: number | undefined | null): string {
   if (mb == null) return '—';
   return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${Math.round(mb)} MB`;

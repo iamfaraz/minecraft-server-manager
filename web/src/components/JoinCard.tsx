@@ -1,4 +1,5 @@
 import { Copy, Download, ExternalLink, Package } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { copy, hostAddress } from '../lib/format';
 import type { ServerSummary } from '../lib/types';
 import { Card } from './ui';
@@ -9,11 +10,20 @@ export function JoinCard({ s }: { s: ServerSummary }) {
   const toast = useToast();
   const mp = s.modpack;
   if (!mp) return null;
-  const address = s.address.remote[0]?.split(' ')[0] || hostAddress(s.port);
+  // At home the manager's own host name reaches the game port (e.g. through Pi-hole); away from home only a
+  // playit tunnel does, since a web tunnel (Cloudflare) can't carry Minecraft.
+  const home = hostAddress(s.port);
+  const away = s.address.remote.find((a) => !a.includes('(Bedrock'))?.split(' ')[0] ?? null;
   const link = mp.slug ? `https://modrinth.com/modpack/${mp.slug}/version/${encodeURIComponent(mp.versionNumber)}` : null;
+  const where = `add the server ${home} at home${away ? `, or ${away} from anywhere else` : ''}`;
   const instructions = link
-    ? `To join ${s.name}:\n1. Install ${mp.title} v${mp.versionNumber} in the Modrinth App or Prism Launcher: ${link}\n2. Launch it and add the server ${address}`
-    : `To join ${s.name}:\n1. Get the ${mp.title} v${mp.versionNumber} pack file from the server admin and import it into the Modrinth App or Prism Launcher.\n2. Launch it and add the server ${address}`;
+    ? `To join ${s.name}:\n1. Install ${mp.title} v${mp.versionNumber} in the Modrinth App or Prism Launcher: ${link}\n2. Launch it and ${where}`
+    : `To join ${s.name}:\n1. Get the ${mp.title} v${mp.versionNumber} pack file from the server admin and import it into the Modrinth App or Prism Launcher.\n2. Launch it and ${where}`;
+  const Addr = ({ a }: { a: string }) => (
+    <button className="font-mono text-ink hover:text-accent" onClick={() => copy(a).then(() => toast.success('Address copied'))}>
+      {a}
+    </button>
+  );
 
   return (
     <Card
@@ -41,11 +51,22 @@ export function JoinCard({ s }: { s: ServerSummary }) {
                 Ask the admin for the <b>{mp.title} v{mp.versionNumber}</b> pack file.
               </p>
             )}
-            <p className="mt-0.5 text-muted">
-              Then connect to{' '}
-              <button className="font-mono text-ink hover:text-accent" onClick={() => copy(address).then(() => toast.success('Address copied'))}>
-                {address}
-              </button>
+            <p className="mt-1 text-muted">Then connect:</p>
+            <p className="text-muted">
+              At home: <Addr a={home} />
+            </p>
+            <p className="text-muted">
+              Away from home:{' '}
+              {away ? (
+                <Addr a={away} />
+              ) : (
+                <span>
+                  no public address yet.{' '}
+                  <Link className="text-accent hover:underline" to={`/servers/${s.id}/settings`}>
+                    Create a playit tunnel
+                  </Link>
+                </span>
+              )}
             </p>
           </div>
         </div>
