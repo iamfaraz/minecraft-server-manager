@@ -79,3 +79,10 @@ test('readMrpack reads overrides from one open archive', async () => {
   await fsp.rm(f);
   assert.equal(r.read(r.overrides[0].entry).toString(), 'A');
 });
+
+test('readMrpack drops index files that an override replaces', async () => {
+  const file = { path: 'mods/a.jar', hashes: { sha1: 'x' }, downloads: ['https://cdn.modrinth.com/a.jar'], fileSize: 1 };
+  const f = await zipFile('p.mrpack', { 'modrinth.index.json': index({ files: [file, { ...file, path: 'mods/b.jar' }] }), 'overrides/mods/a.jar': 'patched' });
+  const r = readMrpack(f);
+  assert.deepEqual(r.index.files.map((x) => x.path), ['mods/b.jar']);
+});

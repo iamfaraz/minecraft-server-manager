@@ -57,3 +57,11 @@ test('replacePackFile moves a pack entry to the admin-updated file', async () =>
   await replacePackFile(i as any, 'mods/sodium-0.5.jar', 'mods/sodium-0.6.jar');
   assert.deepEqual(i.rec.modpack.files[0], { path: 'mods/sodium-0.6.jar', sha1: crypto.createHash('sha1').update('new').digest('hex'), projectId: 'P', adminOwned: true });
 });
+
+test('markAdminOwned records an edited config the pack does not ship yet', async () => {
+  const i = fakeInst('/tmp', {});
+  await markAdminOwned(i as any, 'config/new.toml');
+  assert.deepEqual(i.rec.modpack.overrides, [{ path: 'config/new.toml', packSha1: '', adminOwned: true }]);
+  await markAdminOwned(i as any, 'world/region/r.0.0.mca');
+  assert.equal(i.rec.modpack.overrides.length, 1);
+});

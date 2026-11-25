@@ -6,6 +6,10 @@
 import path from 'node:path';
 import { fileHash } from '../downloads.js';
 import type { ManifestOverride, ModpackRecord } from './install.js';
+import { classifyOverride } from './mrpack.js';
+
+/** Config paths a pack could ship later (an edit there is kept even if the pack starts shipping the file). */
+const PACK_CONFIG = /^(config|defaultconfigs|kubejs|scripts|global_packs)\/|^[^/]+\.(properties|toml|json5?|ya?ml|cfg|txt)$/i;
 
 type PackInst = { root: string; rec: { modpack?: ModpackRecord }; save(): Promise<void> };
 
@@ -36,7 +40,7 @@ export async function snapshotBaselines(inst: PackInst): Promise<void> {
   await inst.save();
 }
 
-/** The admin changed, replaced or deleted a file the pack put there. No-op for other paths. */
+/** The admin changed, replaced or deleted a file the pack put there, or a config the pack may ship later. */
 export async function markAdminOwned(inst: PackInst, rel: string): Promise<void> {
   const mp = inst.rec.modpack;
   if (!mp) return;
@@ -47,6 +51,10 @@ export async function markAdminOwned(inst: PackInst, rel: string): Promise<void>
       e.adminOwned = true;
       changed = true;
     }
+  }
+  if (!changed && ![...mp.files, ...mp.overrides].some((e) => e.path === p) && classifyOverride(p) === 'config' && PACK_CONFIG.test(p)) {
+    mp.overrides.push({ path: p, packSha1: '', adminOwned: true });
+    changed = true;
   }
   if (changed) await inst.save();
 }

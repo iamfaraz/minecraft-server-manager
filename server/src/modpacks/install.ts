@@ -3,8 +3,9 @@ import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { CancelledError, downloads, type DownloadCtx, type DownloadManager, type Progress } from '../downloads.js';
+import { PropertiesFile } from '../util.js';
 import { jarIsClientOnly } from './clientOnly.js';
-import { classifyOverride, readMrpack, type MrpackFile } from './mrpack.js';
+import { classifyOverride, readMrpack, safeTarget, type MrpackFile } from './mrpack.js';
 
 export interface ManifestFile {
   path: string;
@@ -46,6 +47,8 @@ export interface InstallOptions {
   projectIds?: Record<string, string>;
   manager?: DownloadManager;
   log?: (m: string) => void;
+  /** server.properties values the admin chose when creating the server; they win over the pack's file. */
+  properties?: Record<string, string>;
 }
 
 const sha1 = (b: Buffer) => crypto.createHash('sha1').update(b).digest('hex');
@@ -91,7 +94,7 @@ export async function installPackFiles(
 
   await Promise.all(
     wanted.map(async (f) => {
-      const full = path.join(root, f.path);
+      const full = await safeTarget(root, f.path);
       await downloadPackFile(f, full, ctx, m);
       if (!(await droppedAsClientOnly(full, f.path, skips, opts.log))) files.push({ path: f.path, sha1: f.hashes.sha1 || sha1(await fsp.readFile(full)), projectId: opts.projectIds?.[f.path] });
       tick(`Downloaded ${path.basename(f.path)}`);
@@ -102,9 +105,14 @@ export async function installPackFiles(
   for (const o of overrides) {
     if (ctx.signal?.aborted) throw new CancelledError();
     const data = read(o.entry);
-    const full = path.join(root, o.path);
+    const full = await safeTarget(root, o.path);
     await fsp.mkdir(path.dirname(full), { recursive: true });
     await fsp.writeFile(full, data);
+    if (o.path === 'server.properties' && opts.properties && Object.keys(opts.properties).length) {
+      const pf = await PropertiesFile.load(full);
+      for (const [k, v] of Object.entries(opts.properties)) pf.set(k, v);
+      await pf.save();
+    }
     if (classifyOverride(o.path) === 'file') {
       if (!(await droppedAsClientOnly(full, o.path, skips, opts.log))) files.push({ path: o.path, sha1: sha1(data) });
     } else outOverrides.push({ path: o.path, packSha1: sha1(data) });

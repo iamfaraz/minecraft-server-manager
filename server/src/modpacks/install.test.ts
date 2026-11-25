@@ -91,3 +91,19 @@ test('rejects unsafe paths before writing anything', async () => {
   await assert.rejects(run(p), /Unsafe path/);
   assert.deepEqual(await fsp.readdir(p.root), []);
 });
+
+test('refuses to write through a symlink that leaves the server folder', async () => {
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'outside-'));
+  const p = await pack([], { 'overrides/config/x.toml': 'x' });
+  await fsp.symlink(outside, path.join(p.root, 'config'));
+  await assert.rejects(run(p), /outside the server folder/);
+  assert.equal(await exists(path.join(outside, 'x.toml')), false);
+});
+
+test("the wizard's server.properties choices win over the pack's", async () => {
+  const p = await pack([], { 'overrides/server.properties': 'difficulty=easy\nmotd=From the pack\n' });
+  await installPackFiles(p.root, p.mrpack, {}, {}, () => {}, { manager: m(), properties: { difficulty: 'hard' } });
+  const txt = await fsp.readFile(path.join(p.root, 'server.properties'), 'utf8');
+  assert.match(txt, /^difficulty=hard$/m);
+  assert.match(txt, /^motd=From the pack$/m);
+});

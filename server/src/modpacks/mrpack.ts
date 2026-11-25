@@ -4,6 +4,7 @@
  * https://support.modrinth.com/en/articles/8802351-modrinth-modpack-format-mrpack
  */
 import AdmZip from 'adm-zip';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { bad } from '../util.js';
 
@@ -47,6 +48,26 @@ export function assertSafeRelPath(p: string): string {
   const norm = path.posix.normalize(s);
   if (norm === '.' || norm.startsWith('../') || norm === '..' || s.split('/').includes('..')) throw bad(`Unsafe path in modpack: ${p}`);
   return norm;
+}
+
+/**
+ * Where a pack path lands under `root`, refusing it when a symlink already in the server folder (the path itself or
+ * a folder on the way) would send the write somewhere else.
+ */
+export async function safeTarget(root: string, rel: string): Promise<string> {
+  const full = path.join(root, assertSafeRelPath(rel));
+  const realRoot = await fsp.realpath(root);
+  for (let p = full; ; p = path.dirname(p)) {
+    let real: string;
+    try {
+      real = await fsp.realpath(p);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT' && p !== root) continue;
+      throw e;
+    }
+    if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw bad(`Modpack path ${rel} leads outside the server folder`);
+    return full;
+  }
 }
 
 /** Overrides that behave like mods (installed, replaced, removed) rather than like config files (merged with edits). */
@@ -105,6 +126,8 @@ export function readMrpack(file: string): { index: MrpackIndex; overrides: Mrpac
       byPath.set(rel, { path: rel, source, entry: e.entryName });
     }
   }
+  // Overrides are applied after the downloads, so a file both lists and ships is the override's.
+  index.files = index.files.filter((f) => !byPath.has(f.path));
   const read = (name: string): Buffer => {
     const e = zip.getEntry(name);
     if (!e) throw new Error(`${name} missing from modpack`);

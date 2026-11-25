@@ -482,8 +482,8 @@ export class ServerManager {
     return inst.summary();
   }
 
-  private installTask(inst: ServerInstance, label: string) {
-    return downloads.startTask({ label: `${label} · ${inst.rec.name}`, serverId: inst.id, kind: 'server-install', retry: () => this.reinstall(inst.id) });
+  private installTask(inst: ServerInstance, label: string, retry: () => Promise<void> = () => this.reinstall(inst.id)) {
+    return downloads.startTask({ label: `${label} · ${inst.rec.name}`, serverId: inst.id, kind: 'server-install', retry });
   }
 
   private async installAndMaybeStart(
@@ -503,7 +503,7 @@ export class ServerManager {
       await this.doInstall(inst, props, task.ctx);
       if (pack && mp) {
         inst.setProgress(null, `Installing ${mp.title}`);
-        const r = await installPackFiles(inst.root, stagedFile(pack.id), mp.skips, task.ctx, (p, m) => inst.setProgress(p, m), { projectIds: pack.projectIds, log: (m) => inst.pushLog(m) });
+        const r = await installPackFiles(inst.root, stagedFile(pack.id), mp.skips, task.ctx, (p, m) => inst.setProgress(p, m), { projectIds: pack.projectIds, log: (m) => inst.pushLog(m), properties: props });
         mp.files = r.files;
         mp.overrides = r.overrides;
         if (inst.rec.geyser) await installGeyser(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), task.ctx);
@@ -648,7 +648,8 @@ export class ServerManager {
     if (rec.modpack && (newType !== rec.type || opts.version.trim() !== rec.version)) throw bad('This server follows its modpack; detach it first to change the Minecraft version');
     if ((newType === 'BEDROCK') !== (rec.edition === 'bedrock')) throw bad('Cannot switch between Java and Bedrock in place; create a new server and import the world.');
     const wasRunning = inst.isActive;
-    const task = this.installTask(inst, `Install ${TYPE_NAMES[newType]} ${opts.version.trim()}`);
+    // Retry asks for the same change again (the record still names the old version after a failure).
+    const task = this.installTask(inst, `Install ${TYPE_NAMES[newType]} ${opts.version.trim()}`, () => this.changeVersion(id, { ...opts, backupFirst: false }));
     (async () => {
       try {
         if (wasRunning) {

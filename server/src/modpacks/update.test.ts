@@ -188,3 +188,30 @@ test('record is restored even when restoring the backup fails', async () => {
   await assert.rejects(applyPackUpdate(s.inst, 'v2', s.deps), /rollback incomplete.*tar broke/i);
   assert.equal(JSON.stringify(s.inst.rec), snap);
 });
+
+test('a failed update can be retried from the downloads panel', async () => {
+  const s = await setup();
+  let fail = true;
+  s.deps.reinstall = async () => {};
+  const backup = s.deps.backup;
+  s.deps.backup = async (i, l) => {
+    if (fail) throw new Error('disk full');
+    return backup(i, l);
+  };
+  await assert.rejects(applyPackUpdate(s.inst, 'v2', s.deps), /disk full/);
+  const task = s.deps.manager!.snapshot().tasks.at(-1)!;
+  assert.equal(task.state, 'failed');
+  assert.equal(task.canRetry, true);
+  fail = false;
+  await s.deps.manager!.retryTask(task.id);
+  assert.equal(s.mp.versionNumber, '2');
+});
+
+test('an update will not write through a symlink out of the server folder', async () => {
+  const s = await setup();
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'outside-'));
+  await fsp.rm(path.join(s.root, 'config'), { recursive: true });
+  await fsp.symlink(outside, path.join(s.root, 'config'));
+  await assert.rejects(applyPackUpdate(s.inst, 'v2', s.deps), /outside the server folder/);
+  assert.equal(await fsp.access(path.join(outside, 'c.toml')).then(() => true, () => false), false);
+});

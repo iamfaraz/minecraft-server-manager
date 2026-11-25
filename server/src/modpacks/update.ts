@@ -10,7 +10,7 @@ import { downloads, withTask, type DownloadCtx, type DownloadManager } from '../
 import { downloadTo, rmrf } from '../util.js';
 import { decideSkips, jarIsClientOnly } from './clientOnly.js';
 import { downloadPackFile, type ManifestFile, type ManifestOverride, type ModpackRecord } from './install.js';
-import { classifyOverride, loaderFromDeps, readMrpack } from './mrpack.js';
+import { classifyOverride, loaderFromDeps, readMrpack, safeTarget } from './mrpack.js';
 import { defaultVersion, packVersion, packVersions, projectSides, type Fetcher } from './modrinth.js';
 import { hashOrNull } from './ownership.js';
 import { planPackUpdate, type NextFile, type NextOverride, type UpdatePlan } from './plan.js';
@@ -129,7 +129,8 @@ async function runPackUpdate(inst: PackServer, mp: ModpackRecord, versionId: str
   const { version } = await packVersion(versionId, deps.fetcher);
   const from = mp.versionNumber;
 
-  return withTask({ label: `Update modpack ${mp.title} ${from}→${version.versionNumber} · ${inst.rec.name}`, serverId: inst.id, kind: 'modpack' }, async (ctx) => {
+  const retry = () => applyPackUpdate(inst, versionId, deps).then(() => {});
+  return withTask({ label: `Update modpack ${mp.title} ${from}→${version.versionNumber} · ${inst.rec.name}`, serverId: inst.id, kind: 'modpack', retry }, async (ctx) => {
     /* ---- 1. Stage: download and verify everything while the server keeps running ---- */
     await rmrf(staging);
     await fsp.mkdir(path.join(staging, 'files'), { recursive: true });
@@ -162,7 +163,16 @@ async function runPackUpdate(inst: PackServer, mp: ModpackRecord, versionId: str
       // Marked installing from here on so nothing starts the server while files change.
       inst.setState('installing');
       inst.setProgress(null, 'Creating safety backup');
-      const backupId = await deps.backup(inst, `pre-modpack-${from}→${version.versionNumber}`);
+      let backupId: string;
+      try {
+        backupId = await deps.backup(inst, `pre-modpack-${from}→${version.versionNumber}`);
+      } catch (e) {
+        // Nothing has changed yet: put the server back as it was.
+        inst.setState('stopped');
+        inst.pushLog(`[Blockhost] Modpack update stopped: the safety backup failed: ${(e as Error).message}`);
+        if (wasRunning) await deps.start(inst).catch(() => {});
+        throw e;
+      }
       const snapshot = JSON.parse(JSON.stringify(inst.rec));
       const written: string[] = [];
       const mcChanged = loader.mc !== inst.rec.version;
@@ -180,7 +190,7 @@ async function runPackUpdate(inst: PackServer, mp: ModpackRecord, versionId: str
         const files = new Map<string, ManifestFile>(mp.files.map((f) => [f.path, f]));
         const overridesOut = new Map<string, ManifestOverride>(mp.overrides.map((o) => [o.path, o]));
         const place = async (rel: string, data: Buffer | string) => {
-          const full = path.join(inst.root, rel);
+          const full = await safeTarget(inst.root, rel);
           await fsp.mkdir(path.dirname(full), { recursive: true });
           if (typeof data === 'string') await fsp.copyFile(data, full);
           else await fsp.writeFile(full, data);
@@ -189,13 +199,13 @@ async function runPackUpdate(inst: PackServer, mp: ModpackRecord, versionId: str
         for (const a of plan.actions) {
           switch (a.kind) {
             case 'remove':
-              await fsp.rm(path.join(inst.root, a.path), { force: true });
+              await fsp.rm(await safeTarget(inst.root, a.path), { force: true });
               files.delete(a.path);
               break;
             case 'add':
             case 'replace': {
               if (a.kind === 'replace' && a.from) {
-                await fsp.rm(path.join(inst.root, a.from), { force: true });
+                await fsp.rm(await safeTarget(inst.root, a.from), { force: true });
                 files.delete(a.from);
               }
               const src = 'override' in a.file ? overrideData.get(a.file.override)! : path.join(staging, 'files', a.path);
