@@ -106,6 +106,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
     await cleanOldBinaries(root);
   }
 
+  const pin = rec.build?.pinnedLoaderVersion;
   let launch: LaunchSpec;
   let downloadUrl = '';
   let loaderVersion: string | undefined;
@@ -134,7 +135,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       break;
     }
     case 'FABRIC': {
-      const info = await fabricServerJarUrl(rec.version);
+      const info = await fabricServerJarUrl(rec.version, pin);
       downloadUrl = info.url;
       loaderVersion = info.loader;
       const f = await downloadCached(downloadUrl, onProgress, `-fabric-${rec.version}-${info.loader}.jar`, ctx);
@@ -143,7 +144,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       break;
     }
     case 'FORGE': {
-      const info = await forgeInstallerUrl(rec.version);
+      const info = await forgeInstallerUrl(rec.version, pin);
       downloadUrl = info.url;
       loaderVersion = info.forgeVersion;
       const f = await downloadCached(downloadUrl, onProgress, `-forge-${rec.version}-${info.forgeVersion}-installer.jar`, ctx);
@@ -156,7 +157,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       break;
     }
     case 'NEOFORGE': {
-      const info = await neoforgeInstallerUrl(rec.version);
+      const info = await neoforgeInstallerUrl(rec.version, pin);
       downloadUrl = info.url;
       loaderVersion = info.neoVersion;
       const f = await downloadCached(downloadUrl, onProgress, `-neoforge-${info.neoVersion}-installer.jar`, ctx);
@@ -183,7 +184,7 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
   onProgress(100, 'Install complete');
   return {
     javaMajor: major,
-    build: { downloadUrl, loaderVersion, launch, installedAt: new Date().toISOString() },
+    build: { downloadUrl, loaderVersion, pinnedLoaderVersion: pin, launch, installedAt: new Date().toISOString() },
   };
 }
 

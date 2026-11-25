@@ -36,6 +36,8 @@ export interface ServerRecord {
   /** Resolved build info from the last install. */
   build?: {
     loaderVersion?: string;
+    /** Exact loader version to install (set by modpacks); otherwise the newest stable one is used. */
+    pinnedLoaderVersion?: string;
     installerVersion?: string;
     downloadUrl?: string;
     launch?: LaunchSpec;

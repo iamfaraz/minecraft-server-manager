@@ -105,10 +105,19 @@ async function fabricVersions(): Promise<{ versions: string[]; snapshots: string
     snapshots: d.filter((x) => !x.stable).map((x) => x.version),
   };
 }
-export async function fabricServerJarUrl(version: string): Promise<{ url: string; loader: string; installer: string }> {
+export function pickFabricLoader(list: { loader: { version: string; stable?: boolean } }[], pinned?: string): string {
+  if (pinned) {
+    if (!list.some((l) => l.loader?.version === pinned)) throw new Error(`No Fabric loader ${pinned} for this Minecraft version`);
+    return pinned;
+  }
+  const v = (list.find((l) => l.loader?.stable) || list[0])?.loader?.version;
+  if (!v) throw new Error('No Fabric loader for this Minecraft version');
+  return v;
+}
+
+export async function fabricServerJarUrl(version: string, pinned?: string): Promise<{ url: string; loader: string; installer: string }> {
   const loaders = await fetchJson<any[]>(`https://meta.fabricmc.net/v2/versions/loader/${version}`);
-  const loader = (loaders.find((l) => l.loader?.stable) || loaders[0])?.loader?.version;
-  if (!loader) throw new Error(`No Fabric loader for ${version}`);
+  const loader = pickFabricLoader(loaders, pinned);
   const installers = await fetchJson<any[]>('https://meta.fabricmc.net/v2/versions/installer');
   const installer = (installers.find((i) => i.stable) || installers[0])?.version;
   return {
@@ -131,10 +140,26 @@ async function forgeVersions(): Promise<string[]> {
   for (const k of Object.keys(p.promos)) set.add(k.replace(/-(recommended|latest)$/, ''));
   return [...set].sort(compareVersions).reverse();
 }
-export async function forgeInstallerUrl(mcVersion: string): Promise<{ url: string; forgeVersion: string }> {
+/** `all` holds full Maven versions ("1.20.1-47.3.0"); only consulted when a version is pinned. */
+export function pickForgeVersion(promos: Record<string, string>, all: string[], mc: string, pinned?: string): string {
+  if (pinned) {
+    if (!all.some((v) => v === `${mc}-${pinned}` || v.startsWith(`${mc}-${pinned}-`))) throw new Error(`No Forge ${pinned} for Minecraft ${mc}`);
+    return pinned;
+  }
+  const fv = promos[`${mc}-recommended`] || promos[`${mc}-latest`];
+  if (!fv) throw new Error(`No Forge build for ${mc}`);
+  return fv;
+}
+
+const forgeAll = () =>
+  cached('forge-all', TTL, async () => {
+    const xml = await fetchText('https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml');
+    return [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map((m) => m[1]);
+  });
+
+export async function forgeInstallerUrl(mcVersion: string, pinned?: string): Promise<{ url: string; forgeVersion: string }> {
   const p = await forgePromos();
-  const fv = p.promos[`${mcVersion}-recommended`] || p.promos[`${mcVersion}-latest`];
-  if (!fv) throw new Error(`No Forge build for ${mcVersion}`);
+  const fv = pickForgeVersion(p.promos, pinned ? await forgeAll() : [], mcVersion, pinned);
   // Some old versions have an extra suffix (e.g. 1.7.10-10.13.4.1614-1.7.10)
   const full = `${mcVersion}-${fv}`;
   return {
@@ -174,12 +199,20 @@ async function neoforgeVersions(): Promise<string[]> {
   }
   return [...set].sort(compareVersions).reverse();
 }
-export async function neoforgeInstallerUrl(mcVersion: string): Promise<{ url: string; neoVersion: string }> {
-  const all = await neoforgeAll();
-  const candidates = all.filter((v) => neoToMc(v) === mcVersion);
+export function pickNeoForgeVersion(all: string[], mc: string, pinned?: string): string {
+  if (pinned) {
+    if (!all.includes(pinned) || neoToMc(pinned) !== mc) throw new Error(`No NeoForge ${pinned} for Minecraft ${mc}`);
+    return pinned;
+  }
+  const candidates = all.filter((v) => neoToMc(v) === mc);
   const stable = candidates.filter((v) => !/beta|alpha/i.test(v));
   const pick = (stable.length ? stable : candidates).sort(compareVersions).pop();
-  if (!pick) throw new Error(`No NeoForge build for ${mcVersion}`);
+  if (!pick) throw new Error(`No NeoForge build for ${mc}`);
+  return pick;
+}
+
+export async function neoforgeInstallerUrl(mcVersion: string, pinned?: string): Promise<{ url: string; neoVersion: string }> {
+  const pick = pickNeoForgeVersion(await neoforgeAll(), mcVersion, pinned);
   return {
     url: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${pick}/neoforge-${pick}-installer.jar`,
     neoVersion: pick,
