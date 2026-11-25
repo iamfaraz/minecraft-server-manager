@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Check, Coffee, Gamepad2, Globe2, HardDriveDownload, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useGeyserSupport } from '../hooks/useGeyserSupport';
 import { useServers } from '../hooks/useServers';
 import { api } from '../lib/api';
 import { fmtMb } from '../lib/format';
@@ -97,6 +98,7 @@ export function NewServer() {
       pvp: true,
     };
   });
+  const geyser = useGeyserSupport(f.type, f.version);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
   const isJava = f.edition === 'java';
@@ -243,7 +245,7 @@ export function NewServer() {
         levelName: f.worldMode === 'import' && f.importSource === 'server' ? undefined : f.levelName || undefined,
         java: isJava ? { xmxMb: f.xmxMb, xmsMb: f.xmxMb, major: f.javaMajor, preset: f.preset, extraArgs: '' } : undefined,
         properties,
-        geyser: f.geyser,
+        geyser: f.geyser && !geyser.unsupported,
         transport: isJava ? undefined : f.transport,
         autoStart: f.autoStart,
         restartOnCrash: f.restartOnCrash,
@@ -464,7 +466,13 @@ export function NewServer() {
                     />
                   </Field>
                   {GEYSER_OK.includes(f.type) && (
-                    <Toggle checked={f.geyser} onChange={(v) => set('geyser', v)} label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>} description="Lets phones, consoles and Windows 10/11 players join this Java server. Uses two consecutive ports from the Bedrock range (RakNet + NetherNet)." />
+                    <Toggle
+                      checked={f.geyser && !geyser.unsupported}
+                      disabled={geyser.unsupported}
+                      onChange={(v) => set('geyser', v)}
+                      label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>}
+                      description={geyser.reason ?? 'Lets phones, consoles and Windows 10/11 players join this Java server. Uses two consecutive ports from the Bedrock range (RakNet + NetherNet).'}
+                    />
                   )}
                 </>
               )}

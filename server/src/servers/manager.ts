@@ -7,6 +7,7 @@ import { listServerIds, serverBackupsDir, serverDir, serverRecordFile, serverRoo
 import { bad, conflict, dirSize, exists, notFound, readJson, rmrf, slugify, uid, writeJson, HttpError } from '../util.js';
 import { installJava, installGeyser, removeGeyser } from '../install/java.js';
 import { installBedrock } from '../install/bedrock.js';
+import { geyserSupport, versionRange } from '../install/geyserSupport.js';
 import { recommendedJavaMajor } from '../versions/java.js';
 import { ServerInstance } from './instance.js';
 import { pingBedrock, pingJava, probeNetherNet } from './status.js';
@@ -302,6 +303,7 @@ export class ServerManager {
     if (isUpdating(id) && !fromPackUpdate) throw conflict('The modpack is being updated');
     if (inst.isActive) throw conflict('Server is already running');
     if (inst.state === 'installing') throw conflict('Server is installing');
+    await this.fitGeyser(inst);
     let changed = this.reclaimPorts(inst);
     if (resolve?.mode === 'custom') {
       if (resolve.port !== undefined) this.setPort(inst, 'port', resolve.port, true);
@@ -426,6 +428,7 @@ export class ServerManager {
           }
         : undefined;
     const geyser = edition === 'java' && !!input.geyser && GEYSER_TYPES.includes(input.type);
+    if (geyser) await this.assertGeyserFits(input.type, input.version.trim());
     const rec: ServerRecord = {
       id,
       name: input.name.trim(),
@@ -535,8 +538,32 @@ export class ServerManager {
     }
   }
 
+  /** Refuse cross-play where the newest Geyser does not run (it would crash the server on start). */
+  private async assertGeyserFits(type: ServerType, mc: string): Promise<void> {
+    const g = await geyserSupport(type, mc);
+    if (g.supported === false) throw bad(geyserUnsupportedMessage(type, mc, g.versions));
+  }
+
+  /**
+   * Turn cross-play off when the server's Minecraft version is one the newest Geyser does not run on (after a
+   * version change or pack update, or on servers set up before this check). Unknown (offline) leaves it alone.
+   */
+  private async fitGeyser(inst: ServerInstance): Promise<void> {
+    const rec = inst.rec;
+    if (rec.edition !== 'java' || !rec.geyser) return;
+    const g = await geyserSupport(rec.type, rec.version);
+    if (g.supported !== false) return;
+    await removeGeyser(rec, inst.root);
+    rec.geyser = false;
+    rec.geyserPort = undefined;
+    if (rec.broadcast?.enabled) rec.broadcast = { enabled: false };
+    await inst.save();
+    inst.pushLog(`[Blockhost] Cross-play turned off: ${geyserUnsupportedMessage(rec.type, rec.version, g.versions)}`);
+  }
+
   private async doInstall(inst: ServerInstance, props?: Record<string, string>, ctx?: DownloadCtx) {
     const onProgress = (p: number | null, m: string) => inst.setProgress(p, m);
+    await this.fitGeyser(inst);
     if (inst.rec.edition === 'java') {
       const r = await installJava(inst.rec, inst.root, onProgress, props, ctx);
       inst.rec.build = r.build;
@@ -620,6 +647,7 @@ export class ServerManager {
     }
     if (rec.edition === 'java' && patch.geyser !== undefined && !!patch.geyser !== rec.geyser) {
       if (!GEYSER_TYPES.includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric, Quilt or NeoForge');
+      if (patch.geyser) await this.assertGeyserFits(rec.type, rec.version);
       rec.geyser = !!patch.geyser;
       if (rec.geyser) {
         rec.geyserPort = patch.geyserPort || rec.geyserPort || this.allocatePort('udp', id, 2);
@@ -706,6 +734,7 @@ export class ServerManager {
       backup: async (i, label) => (await createBackup(inst, { label, scope: 'full' })).id,
       restore: (i, backupId) => restoreBackup(inst, backupId),
       reinstall: async (i, ctx) => {
+        await this.fitGeyser(inst);
         const r = await installJava(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), undefined, ctx);
         inst.rec.build = r.build;
       },
@@ -746,6 +775,10 @@ export class ServerManager {
     for (const i of this.instances.values()) if (i.rec.java && i.isActive) t += i.rec.java.xmxMb;
     return t;
   }
+}
+
+function geyserUnsupportedMessage(type: ServerType, mc: string, versions: string[]): string {
+  return `Cross-play (Geyser) does not run on Minecraft ${mc} with ${TYPE_NAMES[type]}. The newest Geyser for ${TYPE_NAMES[type]} supports ${versionRange(versions)}.`;
 }
 
 export const manager = new ServerManager();

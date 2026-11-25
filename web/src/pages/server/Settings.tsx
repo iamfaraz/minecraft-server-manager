@@ -8,6 +8,7 @@ import type { ServerSummary, SystemInfo } from '../../lib/types';
 import { GEYSER_TYPES } from '../../lib/types';
 import { Card, ConfirmModal, Field, Segmented, Spinner, Toggle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
+import { useGeyserSupport } from '../../hooks/useGeyserSupport';
 import { ConsoleBroadcast } from './ConsoleBroadcast';
 
 const JAVA_COMMON = ['motd', 'max-players', 'gamemode', 'difficulty', 'pvp', 'online-mode', 'white-list', 'enforce-whitelist', 'view-distance', 'simulation-distance', 'spawn-protection', 'allow-flight', 'allow-nether', 'hardcore', 'level-seed', 'level-type', 'enable-command-block', 'max-world-size', 'player-idle-timeout', 'force-gamemode', 'resource-pack'];
@@ -97,6 +98,7 @@ export function Settings({ s }: { s: ServerSummary }) {
 
   const memCap = sys?.memory.limitMb || sys?.memory.totalMb || 0;
   const geyserOk = GEYSER_TYPES.includes(s.type);
+  const geyserFit = useGeyserSupport(s.type, s.version);
 
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-2">
@@ -179,7 +181,13 @@ export function Settings({ s }: { s: ServerSummary }) {
         {java && geyserOk && (
           <Card title={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play (Geyser + Floodgate)</span>}>
             <div className="space-y-4">
-              <Toggle checked={form.geyser} onChange={(v) => setForm({ ...form, geyser: v })} label="Allow Bedrock players to join" description="Installs Geyser and Floodgate into this server. Bedrock players connect over UDP on the port below." />
+              <Toggle
+                checked={form.geyser}
+                disabled={geyserFit.unsupported && !form.geyser}
+                onChange={(v) => setForm({ ...form, geyser: v })}
+                label="Allow Bedrock players to join"
+                description={geyserFit.reason ?? 'Installs Geyser and Floodgate into this server. Bedrock players connect over UDP on the port below.'}
+              />
               {form.geyser && (
                 <Field
                   label="Bedrock port"
