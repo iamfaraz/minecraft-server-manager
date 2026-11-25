@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
 import { withTask } from './downloads.js';
+import { markAdminOwned, relToRoot } from './modpacks/ownership.js';
 import { downloadTo, exists, fetchJson, normalizePerms, parseJsonLoose, readJson, rmrf, safeJoin, writeJson, bad, HttpError } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -65,6 +66,7 @@ export async function saveAddonUpload(inst: ServerInstance, fileName: string, da
 
 export async function deleteAddon(inst: ServerInstance, fileName: string): Promise<void> {
   await fsp.rm(addonPath(inst, fileName), { force: true });
+  await markAdminOwned(inst, relToRoot(inst.root, addonPath(inst, fileName)));
   const m = await readJson<AddonManifest>(manifestFile(inst), {});
   delete m[fileName.replace(/\.disabled$/, '')];
   await writeJson(manifestFile(inst), m);
@@ -74,6 +76,8 @@ export async function toggleAddon(inst: ServerInstance, fileName: string): Promi
   const p = addonPath(inst, fileName);
   const target = fileName.endsWith('.disabled') ? p.replace(/\.disabled$/, '') : `${p}.disabled`;
   await fsp.rename(p, target);
+  // Disabling a pack mod is the admin's call; updates must not re-enable or replace it.
+  await markAdminOwned(inst, relToRoot(inst.root, p.replace(/\.disabled$/, '')));
 }
 
 const LOADERS: Record<string, string[]> = {

@@ -6,6 +6,7 @@ import os from 'node:os';
 import AdmZip from 'adm-zip';
 import { CancelledError, downloads, withTask } from './downloads.js';
 import { quiltInstallerUrl } from './versions/java.js';
+import { replacePackFile } from './modpacks/ownership.js';
 import { TYPE_NAMES } from './servers/types.js';
 import { fetchJson, downloadTo, exists, readJson, rmrf, run, which, writeJson, bad, notFound, HttpError, fmtBytes } from './util.js';
 import { extensionDir } from './install/java.js';
@@ -186,6 +187,7 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
       await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg), { ...task!.ctx, label: newName });
       await fsp.rm(path.join(inst.root, dir, t.fileName), { force: true });
       await fsp.rename(`${dest}.new`, dest);
+      await replacePackFile(inst, `${dir}/${t.fileName}`, `${dir}/${newName}`);
     } catch (e) {
       progress(inst.id, t.fileName, null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
       await fsp.rm(`${dest}.new`, { force: true });
