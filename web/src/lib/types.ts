@@ -205,6 +205,9 @@ export interface DownloadTask {
   finishedAt?: string;
   canRetry: boolean;
   jobIds: string[];
+  /** Kept by the server as jobs come and go, so they stay right after old jobs leave the history. */
+  files?: { total: number; done: number; failed: number };
+  bytesFinished?: number;
 }
 
 /* ---- ports ---- */

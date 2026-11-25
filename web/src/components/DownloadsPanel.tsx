@@ -41,13 +41,15 @@ function JobRow({ j }: { j: DownloadJob }) {
 
 function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: DownloadJob[]; onCancel: () => void; onRetry: () => void }) {
   const [open, setOpen] = useState(false);
-  const many = jobs.length > 5;
+  // Large tasks outlive the job history, so counts come from the task when the server sends them.
+  const total = t.files?.total ?? jobs.length;
+  const many = total > 5;
   const live = t.state === 'active';
-  const done = jobs.filter((j) => j.state === 'done').length;
-  const failed = jobs.filter((j) => j.state === 'failed').length;
+  const done = t.files?.done ?? jobs.filter((j) => j.state === 'done').length;
+  const failed = t.files?.failed ?? jobs.filter((j) => j.state === 'failed').length;
   const retrying = jobs.filter((j) => isLive(j) && j.attempt > 1).length;
-  const bytesDone = jobs.reduce((a, j) => a + j.bytesDone, 0);
-  const bytesTotal = jobs.reduce((a, j) => a + (j.bytesTotal ?? 0), 0);
+  const bytesDone = t.bytesFinished !== undefined ? t.bytesFinished + jobs.filter((j) => !j.finishedAt).reduce((a, j) => a + j.bytesDone, 0) : jobs.reduce((a, j) => a + j.bytesDone, 0);
+  const bytesTotal = jobs.length === total ? jobs.reduce((a, j) => a + (j.bytesTotal ?? 0), 0) : 0;
   const shown = many && !open ? [] : live ? jobs.filter(isLive).concat(jobs.filter((j) => !isLive(j))) : jobs;
   return (
     <div className="rounded-xl border border-line bg-white/[0.02] px-3 py-2.5">
@@ -76,14 +78,14 @@ function TaskCard({ t, jobs, onCancel, onRetry }: { t: DownloadTask; jobs: Downl
         <button className="mt-1.5 flex w-full items-center gap-1.5 text-left text-xs text-muted hover:text-ink" onClick={() => setOpen((o) => !o)}>
           {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           <span className="tabular-nums">
-            {jobs.length} files · {done} / {jobs.length} · {fmtBytes(bytesDone)}
+            {total} files · {done} / {total} · {fmtBytes(bytesDone)}
             {bytesTotal ? ` / ${fmtBytes(bytesTotal)}` : ''}
           </span>
           {failed > 0 && <span className="text-rose-300">· {failed} failed</span>}
           {retrying > 0 && <span className="text-amber-300">· {retrying} retrying</span>}
         </button>
       )}
-      {many && live && !open && <div className="mt-1.5"><Bar pct={jobs.length ? (done / jobs.length) * 100 : null} /></div>}
+      {many && live && !open && <div className="mt-1.5"><Bar pct={total ? (done / total) * 100 : null} /></div>}
       {(live || open || !many) && shown.length > 0 && (
         <div className="mt-1 divide-y divide-white/5">
           {(live && !open ? shown.filter(isLive) : shown).map((j) => (

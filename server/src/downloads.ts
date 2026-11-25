@@ -22,6 +22,8 @@ export interface DownloadCtx {
   sha512?: string;
   expectedSize?: number;
   signal?: AbortSignal;
+  /** Other URLs for the same file, tried in order within the same job when `url` fails. */
+  mirrors?: string[];
 }
 
 export interface DownloadJob {
@@ -53,6 +55,10 @@ export interface DownloadTask {
   finishedAt?: string;
   canRetry: boolean;
   jobIds: string[];
+  /** Counted as jobs start and end, so they stay right after old jobs drop out of the history. */
+  files: { total: number; done: number; failed: number };
+  /** Bytes of this task's finished downloads. */
+  bytesFinished: number;
 }
 
 export interface TaskHandle {
@@ -73,6 +79,12 @@ export class CancelledError extends Error {
   }
 }
 
+interface Resume {
+  rangeOk: boolean;
+  /** ETag or Last-Modified of the response the .part file came from. */
+  validator?: string;
+}
+
 class AttemptError extends Error {
   constructor(
     message: string,
@@ -86,7 +98,7 @@ export interface ManagerOptions {
   concurrency?: number;
   stallMs?: number;
   connectMs?: number;
-  /** Delay before attempt 2, 3, ...; its length + 1 is the number of attempts. */
+  /** Delay before attempt 2, 3, ...; its length + 1 is the number of attempts per URL. */
   backoffMs?: number[];
 }
 
@@ -129,7 +141,7 @@ function labelFor(url: string): string {
 export class DownloadManager {
   protected readonly opts: Required<ManagerOptions>;
   protected readonly list: DownloadJob[] = [];
-  private readonly inflight = new Map<string, Promise<void>>();
+  private readonly inflight = new Map<string, { p: Promise<void>; hash?: string }>();
   private readonly emitter = new EventEmitter();
   private active = 0;
   private readonly waiting: (() => void)[] = [];
@@ -138,7 +150,7 @@ export class DownloadManager {
   private readonly jobCtl = new Map<string, AbortController>();
 
   constructor(opts: ManagerOptions = {}) {
-    this.opts = { concurrency: 6, stallMs: 60_000, connectMs: 30_000, backoffMs: [2_000, 8_000, 20_000], ...opts };
+    this.opts = { concurrency: 6, stallMs: 60_000, connectMs: 30_000, backoffMs: [2_000, 8_000], ...opts };
     this.emitter.setMaxListeners(50);
   }
 
@@ -149,13 +161,13 @@ export class DownloadManager {
   }
 
   snapshot(): { tasks: DownloadTask[]; jobs: DownloadJob[] } {
-    return { tasks: [...this.taskMap.values()].map((x) => ({ ...x.t, jobIds: [...x.t.jobIds] })), jobs: this.jobs() };
+    return { tasks: [...this.taskMap.values()].map((x) => ({ ...x.t, jobIds: [...x.t.jobIds], files: { ...x.t.files } })), jobs: this.jobs() };
   }
 
   startTask(t: { label: string; serverId?: string; kind: OwnerKind; retry?: () => Promise<void> }): TaskHandle {
     const id = `task${Date.now().toString(36)}${(++this.seq).toString(36)}`;
     const ctl = new AbortController();
-    const task: DownloadTask = { id, label: t.label, serverId: t.serverId, kind: t.kind, state: 'active', startedAt: new Date().toISOString(), canRetry: !!t.retry, jobIds: [] };
+    const task: DownloadTask = { id, label: t.label, serverId: t.serverId, kind: t.kind, state: 'active', startedAt: new Date().toISOString(), canRetry: !!t.retry, jobIds: [], files: { total: 0, done: 0, failed: 0 }, bytesFinished: 0 };
     this.taskMap.set(id, { t: task, ctl, retry: t.retry });
     this.emitter.emit('task', task);
     return {
@@ -260,7 +272,10 @@ export class DownloadManager {
 
   /** Hook for subclasses (task bookkeeping). */
   protected onNewJob(job: DownloadJob): void {
-    if (job.taskId) this.taskMap.get(job.taskId)?.t.jobIds.push(job.id);
+    const t = job.taskId ? this.taskMap.get(job.taskId)?.t : undefined;
+    if (!t) return;
+    t.jobIds.push(job.id);
+    t.files.total++;
   }
 
   protected finish(job: DownloadJob, state: 'done' | 'failed' | 'cancelled', error?: string): void {
@@ -268,14 +283,20 @@ export class DownloadManager {
     job.error = error;
     job.speedBps = 0;
     job.finishedAt = new Date().toISOString();
+    const t = job.taskId ? this.taskMap.get(job.taskId)?.t : undefined;
+    if (t && state === 'done') {
+      t.files.done++;
+      t.bytesFinished += job.bytesDone;
+    } else if (t && state === 'failed') t.files.failed++;
     this.emit(job);
+    if (t) this.emitter.emit('task', t);
     this.trim();
   }
 
   download(url: string, dest: string, ctx: DownloadCtx = {}, onProgress?: Progress): Promise<void> {
     const key = path.resolve(dest);
     const existing = this.inflight.get(key);
-    if (existing) return existing;
+    if (existing) return this.join(existing, url, dest, ctx, onProgress);
     const task = ctx.taskId ? this.taskMap.get(ctx.taskId) : undefined;
     const ctl = new AbortController();
     const signals = [ctl.signal, ...(ctx.signal ? [ctx.signal] : []), ...(task ? [task.ctl.signal] : [])];
@@ -285,8 +306,34 @@ export class DownloadManager {
       this.inflight.delete(key);
       this.jobCtl.delete(job.id);
     });
-    this.inflight.set(key, p);
+    this.inflight.set(key, { p, hash: (ctx.sha512 || ctx.sha1)?.toLowerCase() });
     return p;
+  }
+
+  /**
+   * Someone else is already downloading to `dest`: wait for them instead of downloading twice. If they were
+   * cancelled, download it ourselves; if they checked a different hash (or none), check ours on the result.
+   */
+  private async join(existing: { p: Promise<void>; hash?: string }, url: string, dest: string, ctx: DownloadCtx, onProgress?: Progress): Promise<void> {
+    const task = ctx.taskId ? this.taskMap.get(ctx.taskId) : undefined;
+    const signal = AbortSignal.any([...(ctx.signal ? [ctx.signal] : []), ...(task ? [task.ctl.signal] : [])]);
+    const cancelled = new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(new CancelledError());
+      signal.addEventListener('abort', () => reject(new CancelledError()), { once: true });
+    });
+    cancelled.catch(() => {});
+    try {
+      await Promise.race([existing.p, cancelled]);
+    } catch (e) {
+      if (signal.aborted) throw new CancelledError();
+      if (e instanceof CancelledError) return this.download(url, dest, ctx, onProgress);
+      throw e;
+    }
+    const want = (ctx.sha512 || ctx.sha1)?.toLowerCase();
+    if (want && want !== existing.hash) {
+      const got = await fileHash(dest, ctx.sha512 ? 'sha512' : 'sha1');
+      if (got !== want) throw new Error(`File hash mismatch for ${ctx.label || labelFor(url)}`);
+    }
   }
 
   private async acquire(signal?: AbortSignal): Promise<void> {
@@ -320,7 +367,12 @@ export class DownloadManager {
   private async run(job: DownloadJob, dest: string, ctx: DownloadCtx, onProgress?: Progress): Promise<void> {
     const part = `${dest}.part`;
     const cleanup = () => fsp.rm(part, { force: true }).catch(() => {});
-    await fsp.mkdir(path.dirname(dest), { recursive: true });
+    try {
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+    } catch (e) {
+      this.finish(job, 'failed', (e as Error).message);
+      throw e;
+    }
     try {
       await this.acquire(ctx.signal);
     } catch (e) {
@@ -328,37 +380,45 @@ export class DownloadManager {
       throw e;
     }
     try {
-      const attempts = this.opts.backoffMs.length;
-      const resume = { rangeOk: false };
+      const attempts = this.opts.backoffMs.length + 1;
+      const urls = [job.url, ...(ctx.mirrors ?? [])];
       let lastErr: Error = new Error('Download failed');
-      for (let i = 1; i <= attempts; i++) {
-        if (i > 1) await sleep(this.opts.backoffMs[i - 2], ctx.signal);
-        job.attempt = i;
-        job.state = 'active';
-        job.error = undefined;
-        this.emit(job);
-        try {
-          await this.attempt(job, part, ctx, resume, onProgress);
-          if (ctx.sha512 || ctx.sha1) {
-            job.state = 'verifying';
-            this.emit(job);
-            const algo = ctx.sha512 ? 'sha512' : 'sha1';
-            const got = await fileHash(part, algo);
-            if (got !== (ctx.sha512 || ctx.sha1)!.toLowerCase()) {
-              await cleanup();
-              throw new AttemptError(`File hash mismatch for ${job.label}`, true);
-            }
-          }
-          await fsp.rename(part, dest);
-          this.finish(job, 'done');
-          onProgress?.(100, `Downloaded ${job.label}`);
-          return;
-        } catch (e) {
-          if (e instanceof CancelledError || ctx.signal?.aborted) throw e instanceof CancelledError ? e : new CancelledError();
-          lastErr = e as Error;
-          if (e instanceof AttemptError && !e.retryable) break;
-          job.error = `${lastErr.message}${i < attempts ? ' — retrying' : ''}`;
+      for (let u = 0; u < urls.length; u++) {
+        if (u > 0) {
+          await cleanup();
+          job.url = urls[u];
+          job.error = `${lastErr.message} — trying another mirror`;
+        }
+        const resume: Resume = { rangeOk: false };
+        for (let i = 1; i <= attempts; i++) {
+          if (i > 1) await sleep(this.opts.backoffMs[i - 2], ctx.signal);
+          job.attempt = i;
+          job.state = 'active';
+          job.error = undefined;
           this.emit(job);
+          try {
+            await this.attempt(job, part, ctx, resume, onProgress);
+            if (ctx.sha512 || ctx.sha1) {
+              job.state = 'verifying';
+              this.emit(job);
+              const algo = ctx.sha512 ? 'sha512' : 'sha1';
+              const got = await fileHash(part, algo);
+              if (got !== (ctx.sha512 || ctx.sha1)!.toLowerCase()) {
+                await cleanup();
+                throw new AttemptError(`File hash mismatch for ${job.label}`, true);
+              }
+            }
+            await fsp.rename(part, dest);
+            this.finish(job, 'done');
+            onProgress?.(100, `Downloaded ${job.label}`);
+            return;
+          } catch (e) {
+            if (e instanceof CancelledError || ctx.signal?.aborted) throw e instanceof CancelledError ? e : new CancelledError();
+            lastErr = e as Error;
+            if (e instanceof AttemptError && !e.retryable) break;
+            job.error = `${lastErr.message}${i < attempts ? ' — retrying' : ''}`;
+            this.emit(job);
+          }
         }
       }
       await cleanup();
@@ -379,7 +439,7 @@ export class DownloadManager {
   }
 
   /** One HTTP attempt into `part`. Sets `resume.rangeOk` once the server has said it accepts byte ranges. */
-  private async attempt(job: DownloadJob, part: string, ctx: DownloadCtx, resume: { rangeOk: boolean }, onProgress?: Progress): Promise<void> {
+  private async attempt(job: DownloadJob, part: string, ctx: DownloadCtx, resume: Resume, onProgress?: Progress): Promise<void> {
     let offset = 0;
     if (resume.rangeOk) offset = await fsp.stat(part).then((s) => s.size, () => 0);
     const ctl = new AbortController();
@@ -409,12 +469,18 @@ export class DownloadManager {
       try {
         res = await fetch(job.url, {
           // identity: compressed responses would break the size check and Range resume.
-          headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Encoding': 'identity', ...(offset > 0 ? { Range: `bytes=${offset}-` } : {}) },
+          headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Encoding': 'identity', ...(offset > 0 ? { Range: `bytes=${offset}-`, ...(resume.validator ? { 'If-Range': resume.validator } : {}) } : {}) },
           redirect: 'follow',
           signal: ctl.signal,
         });
       } catch (e) {
         return fail(e);
+      }
+      if (res.status === 416) {
+        // The server will not resume from what we have: start over on the next attempt.
+        resume.rangeOk = false;
+        await fsp.rm(part, { force: true });
+        throw new AttemptError(`Server refused to resume ${job.label}`, true);
       }
       if (!res.ok || !res.body) {
         const retryable = res.status >= 500 || res.status === 408 || res.status === 429;
@@ -422,6 +488,8 @@ export class DownloadManager {
       }
       if (res.headers.get('accept-ranges') === 'bytes') resume.rangeOk = true;
       const resumed = res.status === 206 && offset > 0;
+      // Resume only into the same file: If-Range makes a changed file come back whole (200) instead of spliced.
+      if (!resumed) resume.validator = res.headers.get('etag') || res.headers.get('last-modified') || undefined;
       if (!resumed) offset = 0;
       const len = Number(res.headers.get('content-length') || 0);
       job.bytesTotal = len ? offset + len : ctx.expectedSize ?? null;
@@ -474,19 +542,21 @@ export class DownloadManager {
 
 export const downloads = new DownloadManager();
 
-/** Remove `*.part` files left by downloads that were interrupted (e.g. the app was stopped). */
-export async function sweepPartials(dir: string): Promise<number> {
+/** Remove `*.part` files left by downloads that were interrupted (e.g. the app was stopped), `depth` folders down. */
+export async function sweepPartials(dir: string, depth = 0): Promise<number> {
   let n = 0;
-  let entries: string[] = [];
+  let entries: fs.Dirent[] = [];
   try {
-    entries = await fsp.readdir(dir);
+    entries = await fsp.readdir(dir, { withFileTypes: true });
   } catch {
     return 0;
   }
   for (const e of entries) {
-    if (!e.endsWith('.part')) continue;
-    await fsp.rm(path.join(dir, e), { force: true });
-    n++;
+    if (e.isDirectory() && depth > 0) n += await sweepPartials(path.join(dir, e.name), depth - 1);
+    else if (e.isFile() && e.name.endsWith('.part')) {
+      await fsp.rm(path.join(dir, e.name), { force: true });
+      n++;
+    }
   }
   return n;
 }
@@ -502,7 +572,7 @@ export function wireBus(m: DownloadManager, bus: { publish(ev: any): void }): vo
     if (job.finishedAt) last.delete(job.id);
     bus.publish({ type: 'download.changed', job: { ...job } });
   });
-  m.on('task', (task) => bus.publish({ type: 'download.changed', task: { ...task, jobIds: [...task.jobIds] } }));
+  m.on('task', (task) => bus.publish({ type: 'download.changed', task: { ...task, jobIds: [...task.jobIds], files: { ...task.files } } }));
 }
 
 /** Run `fn` as one download task: its downloads are grouped, and the task ends done or failed with it. */

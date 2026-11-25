@@ -59,6 +59,8 @@ async function main() {
   }
 
   await sweepPartials(config.cacheDir);
+  // Pack files download straight into the server folder (<servers>/<id>/root/mods/…).
+  await sweepPartials(config.serversDir, 3);
   wireBus(downloads, bus);
   await manager.init();
   broadcaster.init((id) => manager.instances.get(id), () => [...manager.instances.values()]);

@@ -51,19 +51,11 @@ export interface InstallOptions {
 const sha1 = (b: Buffer) => crypto.createHash('sha1').update(b).digest('hex');
 const isJar = (p: string) => /\.jar$/i.test(p);
 
-/** Download one pack file, trying each listed URL in turn. */
+/** Download one pack file, trying each listed URL in turn (one job in the downloads panel). */
 export async function downloadPackFile(f: MrpackFile, dest: string, ctx: DownloadCtx, m: DownloadManager): Promise<void> {
-  let last: Error = new Error(`No download URL for ${f.path}`);
-  for (const url of f.downloads) {
-    try {
-      await m.download(url, dest, { ...ctx, label: path.basename(f.path), sha512: f.hashes.sha512, sha1: f.hashes.sha512 ? undefined : f.hashes.sha1, expectedSize: f.fileSize || undefined });
-      return;
-    } catch (e) {
-      if (e instanceof CancelledError) throw e;
-      last = e as Error;
-    }
-  }
-  throw last;
+  const [url, ...mirrors] = f.downloads;
+  if (!url) throw new Error(`No download URL for ${f.path}`);
+  await m.download(url, dest, { ...ctx, mirrors, label: path.basename(f.path), sha512: f.hashes.sha512, sha1: f.hashes.sha512 ? undefined : f.hashes.sha1, expectedSize: f.fileSize || undefined });
 }
 
 /** True when a pack file should be dropped because its own metadata says client-only and the admin did not insist. */

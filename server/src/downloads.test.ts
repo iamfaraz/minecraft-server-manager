@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CancelledError, DownloadManager } from './downloads.js';
-import { fixtureBytes, startFixture, type Fixture } from './test/httpFixture.js';
+import { ETAG, fixtureBytes, startFixture, type Fixture } from './test/httpFixture.js';
 
 let fx: Fixture;
 let dir: string;
@@ -18,7 +18,7 @@ after(async () => {
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
-const mk = (o: Partial<ConstructorParameters<typeof DownloadManager>[0]> = {}) => new DownloadManager({ stallMs: 300, connectMs: 300, backoffMs: [10, 10, 10], ...o });
+const mk = (o: Partial<ConstructorParameters<typeof DownloadManager>[0]> = {}) => new DownloadManager({ stallMs: 300, connectMs: 300, backoffMs: [10, 10], ...o });
 let n = 0;
 const dest = () => path.join(dir, `f${++n}.bin`);
 const exists = (p: string) => fsp.access(p).then(() => true, () => false);
@@ -219,4 +219,78 @@ test('a failed task aborts its other downloads', async () => {
   await new Promise((r) => setTimeout(r, 200));
   const slow = m.jobs().find((j) => j.url.endsWith('/slow/60000'))!;
   assert.equal(slow.state, 'cancelled');
+});
+
+test('makes one more attempt than there are backoff delays', async () => {
+  await assert.rejects(mk({ backoffMs: [10] }).download(`${fx.url}/flaky/5/102`, dest()));
+  assert.equal(fx.hits['/flaky/5/102'], 2);
+});
+
+test('a joined download survives the first caller being cancelled', async () => {
+  const m = mk({ stallMs: 2000 });
+  const d = dest();
+  const a = new AbortController();
+  const first = m.download(`${fx.url}/slow/20000`, d, { signal: a.signal });
+  const second = m.download(`${fx.url}/slow/20000`, d);
+  setTimeout(() => a.abort(), 100);
+  await assert.rejects(first, CancelledError);
+  await second;
+  assert.deepEqual(await fsp.readFile(d), fixtureBytes(20000));
+});
+
+test('a joined download checks its own hash', async () => {
+  const m = mk();
+  const d = dest();
+  const first = m.download(`${fx.url}/ok/2323`, d);
+  const second = m.download(`${fx.url}/ok/2323`, d, { sha1: 'deadbeef' });
+  await first;
+  await assert.rejects(second, /hash mismatch/);
+});
+
+test('a job whose folder cannot be made ends failed', async () => {
+  const m = mk();
+  const blocker = dest();
+  await fsp.writeFile(blocker, 'x');
+  await assert.rejects(m.download(`${fx.url}/ok/10`, path.join(blocker, 'sub', 'f.bin')));
+  assert.equal(m.jobs().at(-1)!.state, 'failed');
+});
+
+test('resume sends If-Range with the ETag', async () => {
+  const d = dest();
+  await mk().download(`${fx.url}/drop/10001`, d);
+  assert.equal(fx.requests['/drop/10001'][1]['if-range'], ETAG);
+});
+
+test('a refused Range (416) restarts from zero', async () => {
+  const d = dest();
+  await mk().download(`${fx.url}/r416/8000`, d);
+  assert.deepEqual(await fsp.readFile(d), fixtureBytes(8000));
+});
+
+test('mirrors are tried within one job', async () => {
+  const m = mk();
+  const d = dest();
+  await m.download(`${fx.url}/status/404`, d, { mirrors: [`${fx.url}/ok/3030`] });
+  assert.deepEqual(await fsp.readFile(d), fixtureBytes(3030));
+  assert.equal(m.jobs().length, 1);
+  assert.equal(m.jobs()[0].state, 'done');
+});
+
+test('task counts survive history trimming', async () => {
+  const m = mk({ concurrency: 20 });
+  const t = m.startTask({ label: 'big', kind: 'modpack' });
+  await Promise.all(Array.from({ length: 120 }, (_, i) => m.download(`${fx.url}/ok/${50 + i}`, path.join(dir, 'many', `${i}.bin`), t.ctx)));
+  t.done();
+  const task = m.snapshot().tasks[0];
+  assert.deepEqual(task.files, { total: 120, done: 120, failed: 0 });
+  assert.equal(task.bytesFinished, Array.from({ length: 120 }, (_, i) => 50 + i).reduce((a, b) => a + b, 0));
+});
+
+test('sweepPartials looks into subfolders up to a depth', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sweep-'));
+  await fsp.mkdir(path.join(root, 's1', 'mods'), { recursive: true });
+  await fsp.writeFile(path.join(root, 's1', 'mods', 'a.jar.part'), 'x');
+  await fsp.writeFile(path.join(root, 's1', 'mods', 'keep.jar'), 'x');
+  assert.equal(await sweepPartials(root, 2), 1);
+  assert.equal(await exists(path.join(root, 's1', 'mods', 'keep.jar')), true);
 });

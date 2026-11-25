@@ -24,13 +24,15 @@ function sendRange(req: http.IncomingMessage, res: http.ServerResponse, body: Bu
     const start = Number(m[1]);
     const end = m[2] ? Number(m[2]) : body.length - 1;
     const part = body.subarray(start, end + 1);
-    res.writeHead(206, { 'Content-Length': part.length, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${body.length}` });
+    res.writeHead(206, { 'Content-Length': part.length, 'Accept-Ranges': 'bytes', ETag: ETAG, 'Content-Range': `bytes ${start}-${end}/${body.length}` });
     res.end(part);
     return;
   }
-  res.writeHead(200, { 'Content-Length': body.length, 'Accept-Ranges': 'bytes' });
+  res.writeHead(200, { 'Content-Length': body.length, 'Accept-Ranges': 'bytes', ETag: ETAG });
   res.end(body);
 }
+
+export const ETAG = '"fixture-v1"';
 
 export async function startFixture(): Promise<Fixture> {
   const hits: Record<string, number> = {};
@@ -60,11 +62,26 @@ export async function startFixture(): Promise<Fixture> {
       case 'drop': {
         const body = fixtureBytes(n(1));
         if (hits[p] === 1) {
-          res.writeHead(200, { 'Content-Length': body.length, 'Accept-Ranges': 'bytes' });
+          res.writeHead(200, { 'Content-Length': body.length, 'Accept-Ranges': 'bytes', ETag: ETAG });
           res.write(body.subarray(0, Math.floor(body.length / 2)), () => setTimeout(() => res.socket?.destroy(), 20));
           return;
         }
         return sendRange(req, res, body);
+      }
+      case 'r416': {
+        // Drops the first response halfway, then refuses every Range request.
+        const body = fixtureBytes(n(1));
+        if (hits[p] === 1) {
+          res.writeHead(200, { 'Content-Length': body.length, 'Accept-Ranges': 'bytes' });
+          res.write(body.subarray(0, Math.floor(body.length / 2)), () => setTimeout(() => res.socket?.destroy(), 20));
+          return;
+        }
+        if (req.headers.range) {
+          res.writeHead(416, { 'Content-Range': `bytes */${body.length}` });
+          return res.end();
+        }
+        res.writeHead(200, { 'Content-Length': body.length });
+        return res.end(body);
       }
       case 'status':
         res.writeHead(n(1));
