@@ -5,10 +5,11 @@ import { visibleTo } from '../api/guard.js';
 import { tokens } from '../api/tokens.js';
 import { manager, type StartResolve } from '../servers/manager.js';
 import { HOST_MARK } from '../servers/hostlog.js';
-import { bad, PropertiesFile } from '../util.js';
+import { bad, HttpError, PropertiesFile } from '../util.js';
 import type { CreateServerInput, ServerRecord, ServerType } from '../servers/types.js';
 import { playit } from '../playit.js';
 import { broadcaster } from '../broadcaster.js';
+import { serverPorts, tunnelsOfServer } from '../playitServer.js';
 
 export async function serverRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
@@ -33,8 +34,15 @@ export async function serverRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string }; Body: Partial<ServerRecord> }>('/api/servers/:id', async (req) => withRemote(await manager.updateSettings(req.params.id, req.body || {})));
 
   app.delete<{ Params: { id: string }; Querystring: { deleteFiles?: string } }>('/api/servers/:id', async (req) => {
+    const rec = { ...manager.get(req.params.id).rec };
     await manager.remove(req.params.id, req.query.deleteFiles !== 'false');
     await tokens.forgetServer(req.params.id);
+    // Free playit accounts get few tunnels; don't leave this server's behind. Never blocks the delete.
+    if (playit.status().state === 'running') {
+      for (const t of tunnelsOfServer(rec, playit.status().tunnels)) {
+        await playit.deleteTunnel(t.id).catch((e) => req.log.warn(`could not delete playit tunnel ${t.id}: ${(e as Error).message}`));
+      }
+    }
     return { ok: true };
   });
 
@@ -133,9 +141,24 @@ export async function serverRoutes(app: FastifyInstance) {
     return broadcaster.status(inst);
   });
 
+  app.get<{ Params: { id: string } }>('/api/servers/:id/tunnels', async (req) => {
+    const inst = manager.get(req.params.id);
+    if (playit.status().state === 'running') await playit.refreshTunnels();
+    const st = playit.status();
+    return {
+      agent: { state: st.state, enabled: st.enabled, claimUrl: st.claimUrl, error: st.error },
+      tunnelsError: st.tunnelsError,
+      ports: serverPorts(inst.rec, st.tunnels),
+    };
+  });
+
   app.post<{ Params: { id: string }; Body: { kind?: 'game' | 'geyser' } }>('/api/servers/:id/tunnel', async (req) => {
     const inst = manager.get(req.params.id);
-    const t = await playit.createTunnel(inst.rec, req.body?.kind || 'game');
+    const kind = req.body?.kind === 'geyser' ? 'geyser' : 'game';
+    if (playit.status().state === 'running') await playit.refreshTunnels(true);
+    const existing = serverPorts(inst.rec, playit.status().tunnels).find((p) => p.kind === kind);
+    if (existing?.tunnel) throw new HttpError(409, `This server already has a tunnel for port ${existing.port}`);
+    const t = await playit.createTunnel(inst.rec, kind);
     return { tunnel: t };
   });
 }

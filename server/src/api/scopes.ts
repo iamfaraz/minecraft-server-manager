@@ -157,6 +157,7 @@ export const ROUTE_SCOPES: Record<string, string> = {
   'POST /api/playit/refresh': 'network:manage',
   'POST /api/playit/reset': 'network:manage',
   'DELETE /api/playit/tunnels/:id': 'network:manage',
+  'GET /api/servers/:id/tunnels': 'network:read',
   'POST /api/servers/:id/tunnel': 'network:manage',
   'GET /api/servers/:id/broadcast': 'network:read',
   'POST /api/servers/:id/broadcast': 'network:manage',
