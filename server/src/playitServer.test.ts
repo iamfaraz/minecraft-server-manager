@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGuard, serverPorts, tunnelsOfServer } from './playitServer.js';
+import { createGuard, serverPorts, tunnelsOfServer, tunnelView } from './playitServer.js';
 import type { PlayitTunnel } from './playit.js';
 
 const tun = (id: string, localPort: number, portType: string): PlayitTunnel => ({
@@ -66,4 +66,35 @@ test('createGuard refuses when tunnels could not be read', () => {
 test('createGuard refuses a duplicate and allows a free port', () => {
   assert.throws(() => createGuard(serverPorts(java, [tun('t', 25565, 'tcp')]), 'game', null), /already has a tunnel for port 25565/);
   assert.doesNotThrow(() => createGuard(serverPorts(java, []), 'game', null));
+});
+
+const bedrockB = { edition: 'bedrock' as const, port: 19132, geyser: false };
+
+test("a leftover geyser port now used by another server is not shown as this server's", () => {
+  const t = tun('b', 19132, 'udp');
+  const ports = serverPorts({ ...java, geyser: false, geyserPort: 19132 }, [t], [bedrockB]);
+  assert.equal(ports.length, 1);
+});
+
+test("deleting a server leaves tunnels another server still uses", () => {
+  const shared = tun('s', 25565, 'tcp');
+  const gey = tun('b', 19132, 'udp');
+  const got = tunnelsOfServer({ ...java, geyser: false, geyserPort: 19132 }, [shared, gey], [java, bedrockB]);
+  assert.deepEqual(got, []);
+});
+
+test('createGuard refuses a kind this server does not expose', () => {
+  assert.throws(() => createGuard(serverPorts(java, []), 'geyser', null), /no cross-play port/i);
+});
+
+test('tunnelView hides tunnels while the agent is not running', () => {
+  const v = tunnelView(java, { state: 'stopped', enabled: true, claimUrl: null, error: null, tunnels: [tun('t', 25565, 'tcp')], tunnelsError: null }, []);
+  assert.equal(v.ports[0].tunnel, null);
+  assert.equal(v.agent.state, 'stopped');
+});
+
+test('tunnelView shows tunnels while running', () => {
+  const t = tun('t', 25565, 'tcp');
+  const v = tunnelView(java, { state: 'running', enabled: true, claimUrl: null, error: null, tunnels: [t], tunnelsError: null }, []);
+  assert.equal(v.ports[0].tunnel, t);
 });

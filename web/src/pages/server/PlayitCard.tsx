@@ -92,7 +92,7 @@ export function PlayitCard({ s }: { s: ServerSummary }) {
             <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">Could not read tunnels from playit: {d.tunnelsError}</p>
           )}
 
-          {d.agent.enabled && (
+          {running && (
             <ul className="divide-y divide-line/60 rounded-xl border border-line">
               {d.ports.map((p) => {
                 const t = p.tunnel;
