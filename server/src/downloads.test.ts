@@ -294,3 +294,29 @@ test('sweepPartials looks into subfolders up to a depth', async () => {
   assert.equal(await sweepPartials(root, 2), 1);
   assert.equal(await exists(path.join(root, 's1', 'mods', 'keep.jar')), true);
 });
+
+test('records when a file actually starts downloading, separate from when it was queued', async () => {
+  const m = mk();
+  await m.download(`${fx.url}/ok/100`, dest());
+  const j = m.jobs().at(-1)!;
+  assert.ok(j.activeAt, 'activeAt is set');
+  assert.ok(j.activeAt! >= j.startedAt && j.activeAt! <= j.finishedAt!);
+});
+
+test('keeps the first start time across retries', async () => {
+  const m = mk();
+  const seen: string[] = [];
+  m.on('change', (j: any) => j.activeAt && seen.push(j.activeAt));
+  await m.download(`${fx.url}/flaky/2/100`, dest());
+  assert.equal(new Set(seen).size, 1);
+});
+
+test('a network error names its cause, not just "fetch failed"', async () => {
+  const net = await import('node:net');
+  const srv = net.createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const port = (srv.address() as { port: number }).port;
+  await new Promise((r) => srv.close(r));
+  const m = mk({ backoffMs: [] });
+  await assert.rejects(m.download(`http://127.0.0.1:${port}/x`, dest()), /ECONNREFUSED/);
+});

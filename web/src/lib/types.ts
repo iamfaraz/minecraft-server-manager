@@ -96,6 +96,7 @@ export interface ServerSummary {
   ping: PingResult | null;
   geyserPing: PingResult | null;
   lastExit: { code: number | null; signal: string | null; at: string; oom: boolean } | null;
+  error?: string | null;
   diskBytes: number;
   lastStats: StatsSample | null;
   install: { pct: number | null; message: string } | null;

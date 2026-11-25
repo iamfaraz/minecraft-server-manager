@@ -591,6 +591,7 @@ export class ServerInstance extends EventEmitter {
       ping: this.ping,
       geyserPing: this.rec.geyser ? this.geyserPing : null,
       lastExit: this.lastExit,
+      error: this.state === 'error' || this.state === 'crashed' ? this.errorDetail : null,
       diskBytes: this.diskBytes,
       lastStats: this.stats[this.stats.length - 1] ?? null,
       install: this.state === 'installing' ? this.install : null,

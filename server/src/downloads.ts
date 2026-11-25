@@ -41,6 +41,8 @@ export interface DownloadJob {
   attempt: number;
   indeterminate?: boolean;
   startedAt: string;
+  /** When bytes first started moving (startedAt is when it was queued). Kept across retries. */
+  activeAt?: string;
   finishedAt?: string;
 }
 
@@ -394,6 +396,7 @@ export class DownloadManager {
           if (i > 1) await sleep(this.opts.backoffMs[i - 2], ctx.signal);
           job.attempt = i;
           job.state = 'active';
+          job.activeAt ??= new Date().toISOString();
           job.error = undefined;
           this.emit(job);
           try {
@@ -461,7 +464,10 @@ export class DownloadManager {
       if (why === 'stall') throw new AttemptError(`No data for ${Math.round(this.opts.stallMs / 1000)}s`, true);
       if (why === 'connect') throw new AttemptError('Connection timed out', true);
       if (e instanceof AttemptError) throw e;
-      throw new AttemptError(`Network error: ${(e as Error).message}`, true);
+      // undici says only "fetch failed"; the useful part (ENOTFOUND host, ECONNREFUSED, a TLS error) is on .cause.
+      const c = (e as { cause?: { code?: string; message?: string } }).cause;
+      const cause = c ? [c.code, c.message].filter(Boolean).join(' ').trim() : '';
+      throw new AttemptError(`Network error: ${(e as Error).message}${cause ? ` (${cause})` : ''}`, true);
     };
     let fh: fsp.FileHandle | null = null;
     try {
