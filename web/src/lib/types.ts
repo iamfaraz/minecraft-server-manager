@@ -146,6 +146,18 @@ export interface PlayitTunnel {
   active: boolean;
   disabledReason?: string | null;
 }
+export interface ServerPort {
+  kind: 'game' | 'geyser';
+  port: number;
+  protocol: 'tcp' | 'udp';
+  inUse: boolean;
+  tunnel: PlayitTunnel | null;
+}
+export interface ServerTunnels {
+  agent: { state: PlayitStatus['state']; enabled: boolean; claimUrl: string | null; error: string | null };
+  tunnelsError: string | null;
+  ports: ServerPort[];
+}
 export interface PlayitStatus {
   state: 'disabled' | 'installing' | 'starting' | 'claiming' | 'running' | 'stopped' | 'error';
   enabled: boolean;

@@ -1,5 +1,6 @@
 /** Which ports a server exposes to playit, and which tunnels belong to it (matched by local port and protocol). */
 import type { PlayitTunnel } from './playit.js';
+import { HttpError } from './util.js';
 import type { ServerRecord } from './servers/types.js';
 
 export type PortKind = 'game' | 'geyser';
@@ -33,4 +34,11 @@ export function serverPorts(rec: Rec, tunnels: PlayitTunnel[]): ServerPort[] {
 export function tunnelsOfServer(rec: Rec, tunnels: PlayitTunnel[]): PlayitTunnel[] {
   const ports = serverPorts(rec, []);
   return tunnels.filter((t) => ports.some((p) => matches(t, p.port, p.protocol)));
+}
+
+/** Before creating a tunnel: refuse when playit's list couldn't be read (a duplicate can't be ruled out) or the port already has one. */
+export function createGuard(ports: ServerPort[], kind: PortKind, tunnelsError: string | null): void {
+  if (tunnelsError) throw new HttpError(503, `Could not check this server's existing tunnels: ${tunnelsError}`);
+  const p = ports.find((x) => x.kind === kind);
+  if (p?.tunnel) throw new HttpError(409, `This server already has a tunnel for port ${p.port}`);
 }

@@ -5,11 +5,11 @@ import { visibleTo } from '../api/guard.js';
 import { tokens } from '../api/tokens.js';
 import { manager, type StartResolve } from '../servers/manager.js';
 import { HOST_MARK } from '../servers/hostlog.js';
-import { bad, HttpError, PropertiesFile } from '../util.js';
+import { bad, PropertiesFile } from '../util.js';
 import type { CreateServerInput, ServerRecord, ServerType } from '../servers/types.js';
 import { playit } from '../playit.js';
 import { broadcaster } from '../broadcaster.js';
-import { serverPorts, tunnelsOfServer } from '../playitServer.js';
+import { createGuard, serverPorts, tunnelsOfServer } from '../playitServer.js';
 
 export async function serverRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
@@ -156,8 +156,8 @@ export async function serverRoutes(app: FastifyInstance) {
     const inst = manager.get(req.params.id);
     const kind = req.body?.kind === 'geyser' ? 'geyser' : 'game';
     if (playit.status().state === 'running') await playit.refreshTunnels(true);
-    const existing = serverPorts(inst.rec, playit.status().tunnels).find((p) => p.kind === kind);
-    if (existing?.tunnel) throw new HttpError(409, `This server already has a tunnel for port ${existing.port}`);
+    const st = playit.status();
+    if (st.state === 'running') createGuard(serverPorts(inst.rec, st.tunnels), kind, st.tunnelsError);
     const t = await playit.createTunnel(inst.rec, kind);
     return { tunnel: t };
   });

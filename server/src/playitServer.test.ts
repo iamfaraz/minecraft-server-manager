@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serverPorts, tunnelsOfServer } from './playitServer.js';
+import { createGuard, serverPorts, tunnelsOfServer } from './playitServer.js';
 import type { PlayitTunnel } from './playit.js';
 
 const tun = (id: string, localPort: number, portType: string): PlayitTunnel => ({
@@ -57,4 +57,13 @@ test('tunnelsOfServer returns game and geyser tunnels only', () => {
   const other = tun('c', 25566, 'tcp');
   const got = tunnelsOfServer({ ...java, geyser: true, geyserPort: 19133 }, [game, gey, other]);
   assert.deepEqual(got.map((t) => t.id).sort(), ['a', 'b']);
+});
+
+test('createGuard refuses when tunnels could not be read', () => {
+  assert.throws(() => createGuard(serverPorts(java, []), 'game', 'playit API: down'), /could not check/i);
+});
+
+test('createGuard refuses a duplicate and allows a free port', () => {
+  assert.throws(() => createGuard(serverPorts(java, [tun('t', 25565, 'tcp')]), 'game', null), /already has a tunnel for port 25565/);
+  assert.doesNotThrow(() => createGuard(serverPorts(java, []), 'game', null));
 });
