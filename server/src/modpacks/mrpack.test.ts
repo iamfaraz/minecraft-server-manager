@@ -72,3 +72,10 @@ test('rejects unsafe file path in index', async () => {
   const f = await zipFile('p.mrpack', { 'modrinth.index.json': index({ files: [{ path: '../evil.jar', hashes: { sha1: 'a', sha512: 'b' }, downloads: ['https://x'], fileSize: 1 }] }) });
   assert.throws(() => readMrpack(f), /path/i);
 });
+
+test('readMrpack reads overrides from one open archive', async () => {
+  const f = await zipFile('p.mrpack', { 'modrinth.index.json': index(), 'overrides/config/a.toml': 'A' });
+  const r = readMrpack(f);
+  await fsp.rm(f);
+  assert.equal(r.read(r.overrides[0].entry).toString(), 'A');
+});

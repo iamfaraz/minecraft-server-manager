@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { CancelledError, downloads, type DownloadCtx, type DownloadManager, type Progress } from '../downloads.js';
 import { jarIsClientOnly } from './clientOnly.js';
-import { classifyOverride, readMrpack, readOverride, type MrpackFile } from './mrpack.js';
+import { classifyOverride, readMrpack, type MrpackFile } from './mrpack.js';
 
 export interface ManifestFile {
   path: string;
@@ -36,6 +36,8 @@ export interface ModpackRecord {
   /** Admin choices from the preview: true = skip this pack file, false = install it even if flagged. */
   skips: Record<string, boolean>;
   updates: { mode: 'notify' | 'ignore'; skippedVersionId?: string };
+  /** The staged pack this server is installed from, until that install has finished. */
+  stagedId?: string;
   /** Config baselines still need to be recorded at the next successful start. */
   baselinePending?: boolean;
 }
@@ -83,7 +85,7 @@ export async function installPackFiles(
 ): Promise<Pick<ModpackRecord, 'files' | 'overrides'>> {
   const m = opts.manager ?? downloads;
   // Validates every path before anything is written.
-  const { index, overrides } = readMrpack(mrpack);
+  const { index, overrides, read } = readMrpack(mrpack);
   const wanted = index.files.filter((f) => {
     if (skips[f.path] === true) return false;
     if (skips[f.path] === false) return true;
@@ -107,7 +109,7 @@ export async function installPackFiles(
   const outOverrides: ManifestOverride[] = [];
   for (const o of overrides) {
     if (ctx.signal?.aborted) throw new CancelledError();
-    const data = readOverride(mrpack, o.entry);
+    const data = read(o.entry);
     const full = path.join(root, o.path);
     await fsp.mkdir(path.dirname(full), { recursive: true });
     await fsp.writeFile(full, data);

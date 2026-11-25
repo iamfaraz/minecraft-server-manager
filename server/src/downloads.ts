@@ -163,7 +163,11 @@ export class DownloadManager {
       signal: ctl.signal,
       ctx: { taskId: id, serverId: t.serverId, kind: t.kind, signal: ctl.signal },
       done: () => this.endTask(id, 'done'),
-      fail: (e: Error) => this.endTask(id, e instanceof CancelledError || ctl.signal.aborted ? 'cancelled' : 'failed', e.message),
+      fail: (e: Error) => {
+        this.endTask(id, e instanceof CancelledError || ctl.signal.aborted ? 'cancelled' : 'failed', e.message);
+        // Stop the task's other downloads: nothing will use them now.
+        ctl.abort();
+      },
     };
   }
 
@@ -404,7 +408,8 @@ export class DownloadManager {
       let res: Response;
       try {
         res = await fetch(job.url, {
-          headers: { 'User-Agent': UA, Accept: '*/*', ...(offset > 0 ? { Range: `bytes=${offset}-` } : {}) },
+          // identity: compressed responses would break the size check and Range resume.
+          headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Encoding': 'identity', ...(offset > 0 ? { Range: `bytes=${offset}-` } : {}) },
           redirect: 'follow',
           signal: ctl.signal,
         });

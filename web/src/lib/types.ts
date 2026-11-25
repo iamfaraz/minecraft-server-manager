@@ -322,7 +322,7 @@ export interface StagedPack {
 export interface PackHit { projectId: string; slug: string; title: string; icon?: string; downloads: number; mcVersions: string[]; loaders: string[] }
 export interface PackVersion { id: string; name: string; versionNumber: string; type: string; mc: string[]; loaders: string[]; date: string; fileSize: number }
 export interface PackUpdateInfo { available: boolean; latest?: { versionId: string; versionNumber: string; mc: string; loaders: string[] }; changesMcVersion: boolean }
-export interface PackUpdateResult { added: number; updated: number; removed: number; configsUpdated: number; configsKept: string[]; adminKept: string[]; mcChanged: boolean; from: string; to: string }
+export interface PackUpdateResult { added: number; updated: number; removed: number; configsUpdated: number; configsKept: string[]; adminKept: string[]; mcChanged: boolean; from: string; to: string; startError?: string }
 export interface ModpackRecord {
   source: 'modrinth' | 'upload';
   projectId?: string;

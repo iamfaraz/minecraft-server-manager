@@ -198,7 +198,8 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
   if (PLUGIN_TYPES.includes(rec.type)) await fsp.mkdir(path.join(root, 'plugins'), { recursive: true });
   if (MOD_TYPES.includes(rec.type)) await fsp.mkdir(path.join(root, 'mods'), { recursive: true });
 
-  if (rec.geyser) await installGeyser(rec, root, onProgress, ctx);
+  // Modpack servers get Geyser after the pack's own mods are in place (see manager), so its Fabric API is not doubled.
+  if (rec.geyser && !rec.modpack) await installGeyser(rec, root, onProgress, ctx);
 
   onProgress(100, 'Install complete');
   return {
@@ -250,7 +251,7 @@ export async function installGeyser(rec: ServerRecord, root: string, onProgress:
     if (e instanceof CancelledError) throw e;
     onProgress(null, `Floodgate not available for ${platform} (${(e as Error).message}); Geyser installed without it`);
   }
-  if (rec.type === 'FABRIC' || rec.type === 'QUILT') {
+  if ((rec.type === 'FABRIC' || rec.type === 'QUILT') && !(await hasFabricApi(target))) {
     onProgress(null, 'Downloading Fabric API');
     const versions = await fetchJson<any[]>(
       `https://api.modrinth.com/v2/project/fabric-api/version?loaders=${encodeURIComponent('["fabric"]')}&game_versions=${encodeURIComponent(JSON.stringify([rec.version]))}`,
@@ -258,6 +259,17 @@ export async function installGeyser(rec: ServerRecord, root: string, onProgress:
     const file = versions?.[0]?.files?.find((f: any) => f.primary) || versions?.[0]?.files?.[0];
     if (file?.url) await downloadTo(file.url, path.join(target, file.filename || 'fabric-api.jar'), onProgress, ctx);
   }
+}
+
+/** True when mods/ already holds Fabric API or Quilted Fabric API (a second copy stops the server). */
+export async function hasFabricApi(modsDir: string): Promise<boolean> {
+  let entries: string[] = [];
+  try {
+    entries = await fsp.readdir(modsDir);
+  } catch {
+    return false;
+  }
+  return entries.some((e) => /^(fabric-api|qfapi|quilted-fabric-api)[-_].*\.jar$/i.test(e));
 }
 
 export async function removeGeyser(rec: ServerRecord, root: string): Promise<void> {

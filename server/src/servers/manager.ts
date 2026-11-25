@@ -15,7 +15,7 @@ import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSe
 import { GEYSER_TYPES, JAVA_TYPES, TYPE_NAMES } from './types.js';
 import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
 import { installPackFiles } from '../modpacks/install.js';
-import { applyPackUpdate, packArchivePath } from '../modpacks/update.js';
+import { applyPackUpdate, isUpdating, modpackReinstall, packArchivePath } from '../modpacks/update.js';
 import { deleteStaged, getStaged, stagedFile, type StagedPack } from '../modpacks/store.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, restoreBackup, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
@@ -297,8 +297,9 @@ export class ServerManager {
    * of them, this fails with a PORT_CONFLICT error describing who and offering a free port, and the caller can
    * retry with `resolve`: stop the servers in the way, let Blockhost pick new ports, or name the ports to use.
    */
-  async startServer(id: string, resolve?: StartResolve): Promise<void> {
+  async startServer(id: string, resolve?: StartResolve, fromPackUpdate = false): Promise<void> {
     const inst = this.get(id);
+    if (isUpdating(id) && !fromPackUpdate) throw conflict('The modpack is being updated');
     if (inst.isActive) throw conflict('Server is already running');
     if (inst.state === 'installing') throw conflict('Server is installing');
     let changed = this.reclaimPorts(inst);
@@ -463,6 +464,8 @@ export class ServerManager {
         overrides: [],
         skips: packSkips,
         updates: { mode: 'notify' },
+        // Kept until the pack is installed, so Retry/Repair can install it again.
+        stagedId: staged.id,
       };
     }
 
@@ -503,9 +506,12 @@ export class ServerManager {
         const r = await installPackFiles(inst.root, stagedFile(pack.id), mp.skips, task.ctx, (p, m) => inst.setProgress(p, m), { projectIds: pack.projectIds, log: (m) => inst.pushLog(m) });
         mp.files = r.files;
         mp.overrides = r.overrides;
+        if (inst.rec.geyser) await installGeyser(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), task.ctx);
         mp.baselinePending = true;
         await fsp.mkdir(path.join(inst.dir, '.modpack'), { recursive: true });
         await fsp.copyFile(stagedFile(pack.id), packArchivePath(inst));
+        await inst.save();
+        delete mp.stagedId;
         await inst.save();
         await deleteStaged(pack.id).catch(() => {});
       }
@@ -636,7 +642,7 @@ export class ServerManager {
   /** Change version and/or type in place. Worlds, configs, plugins and mods are kept. */
   async changeVersion(id: string, opts: { version: string; type?: ServerType; javaMajor?: number | 'auto'; backupFirst?: boolean }): Promise<void> {
     const inst = this.get(id);
-    if (inst.state === 'installing') throw conflict('Already installing');
+    if (inst.state === 'installing' || isUpdating(id)) throw conflict('Already installing');
     const rec = inst.rec;
     const newType = opts.type || rec.type;
     if (rec.modpack && (newType !== rec.type || opts.version.trim() !== rec.version)) throw bad('This server follows its modpack; detach it first to change the Minecraft version');
@@ -702,13 +708,26 @@ export class ServerManager {
         const r = await installJava(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), undefined, ctx);
         inst.rec.build = r.build;
       },
-      start: () => this.startServer(inst.id),
+      start: () => this.startServer(inst.id, undefined, true),
     });
   }
 
   /** Re-run the installer for the current version (repair). */
   async reinstall(id: string): Promise<void> {
     const inst = this.get(id);
+    const mp = inst.rec.modpack;
+    if (mp) {
+      const what = modpackReinstall({ archive: await exists(packArchivePath(inst)), stagedId: mp.stagedId, staged: !!mp.stagedId && (await getStaged(mp.stagedId).then(() => true, () => false)) });
+      if (what === 'refuse') throw bad("This modpack server never finished installing and its pack file is gone. Delete it and create it again from the pack.");
+      if (what === 'pack') {
+        // The first install was interrupted: install the loader and the pack again from the staged file.
+        if (inst.isActive || inst.state === 'installing' || isUpdating(id)) throw conflict('Already installing');
+        const staged = await getStaged(mp.stagedId!);
+        const projectIds = Object.fromEntries(staged.files.filter((f) => f.projectId).map((f) => [f.path, f.projectId!]));
+        this.installAndMaybeStart(inst, undefined, null, undefined, false, undefined, { id: staged.id, projectIds }).catch(() => {});
+        return;
+      }
+    }
     await this.changeVersion(id, { version: inst.rec.version, backupFirst: false });
   }
 

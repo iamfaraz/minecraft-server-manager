@@ -1,5 +1,7 @@
 /** Local HTTP server for download tests. Not used by the app. */
 import http from 'node:http';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import type { AddressInfo } from 'node:net';
 
 export function fixtureBytes(size: number): Buffer {
@@ -72,6 +74,17 @@ export async function startFixture(): Promise<Fixture> {
         res.writeHead(200, { 'Content-Length': body.length });
         res.write(body.subarray(0, body.length - 10), () => res.socket?.destroy());
         return;
+      }
+      case 'gzip': {
+        // Compresses when the client allows it, like many CDNs do.
+        const body = fixtureBytes(n(1));
+        if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) {
+          const z = require('node:zlib').gzipSync(body);
+          res.writeHead(200, { 'Content-Length': z.length, 'Content-Encoding': 'gzip' });
+          return res.end(z);
+        }
+        res.writeHead(200, { 'Content-Length': body.length });
+        return res.end(body);
       }
       case 'slow': {
         const body = fixtureBytes(n(1));

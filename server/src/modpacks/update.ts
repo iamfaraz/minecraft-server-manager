@@ -10,7 +10,7 @@ import { downloads, withTask, type DownloadCtx, type DownloadManager } from '../
 import { downloadTo, rmrf } from '../util.js';
 import { decideSkips, jarIsClientOnly } from './clientOnly.js';
 import { downloadPackFile, type ManifestFile, type ManifestOverride, type ModpackRecord } from './install.js';
-import { classifyOverride, loaderFromDeps, readMrpack, readOverride } from './mrpack.js';
+import { classifyOverride, loaderFromDeps, readMrpack } from './mrpack.js';
 import { defaultVersion, packVersion, packVersions, projectSides, type Fetcher } from './modrinth.js';
 import { hashOrNull } from './ownership.js';
 import { planPackUpdate, type NextFile, type NextOverride, type UpdatePlan } from './plan.js';
@@ -98,12 +98,32 @@ export async function detachPack(inst: PackServer): Promise<void> {
   await inst.save();
 }
 
-export type PackUpdateResult = UpdatePlan['summary'] & { mcChanged: boolean; from: string; to: string };
+export type PackUpdateResult = UpdatePlan['summary'] & { mcChanged: boolean; from: string; to: string; startError?: string };
+
+/** Servers with a pack update in progress (staging included). Start, version changes and restores refuse meanwhile. */
+const updating = new Set<string>();
+export const isUpdating = (id: string) => updating.has(id);
+
+/** What Repair/Retry should do on a modpack server. */
+export function modpackReinstall(s: { archive: boolean; stagedId?: string; staged: boolean }): 'loader' | 'pack' | 'refuse' {
+  if (s.archive) return 'loader';
+  return s.stagedId && s.staged ? 'pack' : 'refuse';
+}
 
 export async function applyPackUpdate(inst: PackServer, versionId: string, deps: UpdateDeps): Promise<PackUpdateResult> {
   const mp = inst.rec.modpack;
   if (!mp) throw new Error('This server is not following a modpack');
+  if (updating.has(inst.id)) throw new Error('This server is already being updated');
   if (inst.state === 'installing') throw new Error('Already installing');
+  updating.add(inst.id);
+  try {
+    return await runPackUpdate(inst, mp, versionId, deps);
+  } finally {
+    updating.delete(inst.id);
+  }
+}
+
+async function runPackUpdate(inst: PackServer, mp: ModpackRecord, versionId: string, deps: UpdateDeps): Promise<PackUpdateResult> {
   const m = deps.manager ?? downloads;
   const staging = path.join(inst.dir, '.pack-staging');
   const { version } = await packVersion(versionId, deps.fetcher);
@@ -117,12 +137,12 @@ export async function applyPackUpdate(inst: PackServer, versionId: string, deps:
     try {
       inst.setProgress(null, `Downloading ${mp.title} ${version.versionNumber}`);
       await (deps.fetchPack ?? ((url, dest, h, c) => downloadTo(url, dest, undefined, { ...c, sha1: h })))(version.fileUrl, packFile, version.fileSha1, ctx);
-      const { index, overrides } = readMrpack(packFile);
+      const { index, overrides, read } = readMrpack(packFile);
       const loader = loaderFromDeps(index.dependencies);
       const sides = await projectSides(index.files.map((f) => f.hashes.sha1), deps.fetcher).catch(() => ({}) as Record<string, { projectId: string; serverSide: string }>);
       const decisions = decideSkips(index.files.map((f) => ({ path: f.path, env: f.env, projectServerSide: sides[f.hashes.sha1]?.serverSide })), mp.skips);
       const nextFiles: NextFile[] = index.files.map((f, i) => ({ ...f, projectId: sides[f.hashes.sha1]?.projectId, skip: decisions[i].skip }));
-      const overrideData = new Map(overrides.map((o) => [o.path, readOverride(packFile, o.entry)]));
+      const overrideData = new Map(overrides.map((o) => [o.path, read(o.entry)]));
       const nextOverrides: NextOverride[] = overrides.map((o) => ({ path: o.path, sha1: sha1(overrideData.get(o.path)!), cls: classifyOverride(o.path) }));
 
       const paths = new Set([...mp.files.map((f) => f.path), ...mp.overrides.map((o) => o.path), ...nextOverrides.map((o) => o.path), ...nextFiles.map((f) => f.path)]);
@@ -139,13 +159,15 @@ export async function applyPackUpdate(inst: PackServer, versionId: string, deps:
         inst.pushLog('[Blockhost] Stopping for modpack update');
         await inst.stop();
       }
+      // Marked installing from here on so nothing starts the server while files change.
+      inst.setState('installing');
       inst.setProgress(null, 'Creating safety backup');
       const backupId = await deps.backup(inst, `pre-modpack-${from}→${version.versionNumber}`);
       const snapshot = JSON.parse(JSON.stringify(inst.rec));
       const written: string[] = [];
       const mcChanged = loader.mc !== inst.rec.version;
+      let result: PackUpdateResult;
       try {
-        inst.setState('installing');
         if (mcChanged || loader.type !== inst.rec.type || (loader.loaderVersion ?? undefined) !== inst.rec.build?.pinnedLoaderVersion) {
           inst.rec.type = loader.type;
           inst.rec.version = loader.mc;
@@ -217,19 +239,38 @@ export async function applyPackUpdate(inst: PackServer, versionId: string, deps:
         await inst.save();
         inst.setState('stopped');
         inst.pushLog(`[Blockhost] Modpack updated: ${mp.title} ${from} → ${version.versionNumber}`);
-        if (wasRunning) await deps.start(inst);
-        return { ...plan.summary, mcChanged, from, to: version.versionNumber };
+        result = { ...plan.summary, mcChanged, from, to: version.versionNumber };
       } catch (e) {
         inst.pushLog(`[Blockhost] Modpack update failed, rolling back: ${(e as Error).message}`);
         inst.setState('stopped');
         for (const rel of written) await fsp.rm(path.join(inst.root, rel), { force: true }).catch(() => {});
-        await deps.restore(inst, backupId);
+        let restoreError: Error | null = null;
+        try {
+          await deps.restore(inst, backupId);
+        } catch (re) {
+          restoreError = re as Error;
+        }
+        // The record always goes back, even if the files could not be restored.
         for (const k of Object.keys(inst.rec)) delete (inst.rec as any)[k];
         Object.assign(inst.rec, snapshot);
         await inst.save();
+        if (restoreError) {
+          inst.pushLog(`[Blockhost] Restoring backup ${backupId} failed: ${restoreError.message}. Restore it from Backups.`);
+          throw new Error(`Update failed and rollback incomplete: ${(e as Error).message}; restoring backup ${backupId} failed: ${restoreError.message}`);
+        }
         if (wasRunning) await deps.start(inst).catch(() => {});
         throw new Error(`Update failed and was rolled back: ${(e as Error).message}`);
       }
+      // The update stands even if the server then fails to start (e.g. its port is taken).
+      if (wasRunning) {
+        try {
+          await deps.start(inst);
+        } catch (e) {
+          result.startError = (e as Error).message;
+          inst.pushLog(`[Blockhost] Updated, but the server did not start: ${result.startError}`);
+        }
+      }
+      return result;
     } finally {
       await rmrf(staging);
     }

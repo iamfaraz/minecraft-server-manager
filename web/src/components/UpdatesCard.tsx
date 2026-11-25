@@ -104,6 +104,7 @@ export function UpdatesCard({ s }: { s: ServerSummary }) {
                 {packResult.from} → {packResult.to}: {packResult.added} added, {packResult.updated} updated, {packResult.removed} removed, {packResult.configsUpdated} configs updated.
               </p>
               {packResult.configsKept.length > 0 && <p className="mt-1 text-muted">Kept your version of: {packResult.configsKept.join(', ')}</p>}
+              {packResult.startError && <p className="mt-1 text-amber-300">The update is installed, but the server did not start: {packResult.startError}</p>}
               {packResult.adminKept.length > 0 && <p className="mt-1 text-muted">Left alone because you changed them: {packResult.adminKept.join(', ')}</p>}
             </div>
           )}

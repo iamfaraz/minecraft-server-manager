@@ -204,3 +204,19 @@ test('withTask marks task done or failed', async () => {
   const states = Object.fromEntries(m.snapshot().tasks.map((t) => [t.label, t.state]));
   assert.deepEqual(states, { ok: 'done', bad: 'failed' });
 });
+
+/* ---------------- Final review fixes ---------------- */
+test('downloads a file a server would gzip', async () => {
+  const d = dest();
+  await mk().download(`${fx.url}/gzip/5000`, d);
+  assert.deepEqual(await fsp.readFile(d), fixtureBytes(5000));
+});
+
+test('a failed task aborts its other downloads', async () => {
+  const m = mk({ stallMs: 5000 });
+  const { withTask } = await import('./downloads.js');
+  await assert.rejects(withTask({ label: 'T', kind: 'modpack' }, (ctx) => Promise.all([m.download(`${fx.url}/status/403`, dest(), ctx), m.download(`${fx.url}/slow/60000`, dest(), ctx)]), m));
+  await new Promise((r) => setTimeout(r, 200));
+  const slow = m.jobs().find((j) => j.url.endsWith('/slow/60000'))!;
+  assert.equal(slow.state, 'cancelled');
+});

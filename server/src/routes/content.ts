@@ -1,6 +1,6 @@
 import { deleteAllBackups } from '../storage.js';
 import { checkUpdates } from '../updates.js';
-import { detachPack, packArchivePath, setPackUpdateMode, skipPackVersion } from '../modpacks/update.js';
+import { detachPack, isUpdating, packArchivePath, setPackUpdateMode, skipPackVersion } from '../modpacks/update.js';
 import * as assets from '../inventory/assets.js';
 import * as inventory from '../inventory/index.js';
 import type { FastifyInstance } from 'fastify';
@@ -59,6 +59,7 @@ export async function contentRoutes(app: FastifyInstance) {
   });
   app.delete<{ Params: { id: string } }>('/api/servers/:id/backups', async (req) => ({ deleted: await deleteAllBackups(req.params.id) }));
   app.post<{ Params: { id: string; bid: string } }>('/api/servers/:id/backups/:bid/restore', async (req) => {
+    if (isUpdating(req.params.id)) throw bad('The modpack is being updated; try again when it finishes');
     await restoreBackup(manager.get(req.params.id), req.params.bid);
     return { ok: true };
   });

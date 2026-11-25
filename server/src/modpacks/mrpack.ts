@@ -74,7 +74,7 @@ function openZip(file: string): AdmZip {
   }
 }
 
-export function readMrpack(file: string): { index: MrpackIndex; overrides: MrpackOverride[] } {
+export function readMrpack(file: string): { index: MrpackIndex; overrides: MrpackOverride[]; read(entry: string): Buffer } {
   const zip = openZip(file);
   const entry = zip.getEntry('modrinth.index.json');
   if (!entry) {
@@ -105,12 +105,10 @@ export function readMrpack(file: string): { index: MrpackIndex; overrides: Mrpac
       byPath.set(rel, { path: rel, source, entry: e.entryName });
     }
   }
-  return { index, overrides: [...byPath.values()] };
-}
-
-/** Read one override's bytes out of the pack. */
-export function readOverride(file: string, entry: string): Buffer {
-  const e = openZip(file).getEntry(entry);
-  if (!e) throw new Error(`${entry} missing from modpack`);
-  return e.getData();
+  const read = (name: string): Buffer => {
+    const e = zip.getEntry(name);
+    if (!e) throw new Error(`${name} missing from modpack`);
+    return e.getData();
+  };
+  return { index, overrides: [...byPath.values()], read };
 }

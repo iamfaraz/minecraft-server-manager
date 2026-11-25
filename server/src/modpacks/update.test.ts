@@ -141,3 +141,50 @@ test('detachPack clears pin and modpack', async () => {
   assert.equal(s.inst.rec.modpack, undefined);
   assert.equal(s.inst.rec.build.pinnedLoaderVersion, undefined);
 });
+
+test('a second update while one runs is refused', async () => {
+  const s = await setup();
+  let release!: () => void;
+  s.deps.fetchPack = async (_u, dest) => {
+    await new Promise<void>((r) => (release = r));
+    await fsp.copyFile(path.join(s.base, 'v2.mrpack'), dest);
+  };
+  const first = applyPackUpdate(s.inst, 'v2', s.deps);
+  await new Promise((r) => setTimeout(r, 50));
+  await assert.rejects(applyPackUpdate(s.inst, 'v2', s.deps), /already being updated/i);
+  release();
+  await first;
+});
+
+test('server is marked installing during the backup', async () => {
+  const s = await setup({ running: true });
+  let stateAtBackup = '';
+  s.deps.backup = async (i) => ((stateAtBackup = i.state), 'b1');
+  await applyPackUpdate(s.inst, 'v2', s.deps);
+  assert.equal(stateAtBackup, 'installing');
+});
+
+test('a start failure after a good update does not roll it back', async () => {
+  const s = await setup({ running: true });
+  s.deps.start = async () => {
+    throw new Error('port in use');
+  };
+  const r = await applyPackUpdate(s.inst, 'v2', s.deps);
+  assert.equal(s.events.includes('restore'), false);
+  assert.equal(s.inst.rec.modpack.versionId, 'v2');
+  assert.match(r.startError!, /port in use/);
+});
+
+test('record is restored even when restoring the backup fails', async () => {
+  const s = await setup();
+  s.inst.rec.version = '1.20.1';
+  const snap = JSON.stringify(s.inst.rec);
+  s.deps.reinstall = async () => {
+    throw new Error('boom');
+  };
+  s.deps.restore = async () => {
+    throw new Error('tar broke');
+  };
+  await assert.rejects(applyPackUpdate(s.inst, 'v2', s.deps), /rollback incomplete.*tar broke/i);
+  assert.equal(JSON.stringify(s.inst.rec), snap);
+});
