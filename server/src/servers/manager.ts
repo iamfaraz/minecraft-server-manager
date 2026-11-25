@@ -15,8 +15,9 @@ import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSe
 import { GEYSER_TYPES, JAVA_TYPES, TYPE_NAMES } from './types.js';
 import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
 import { installPackFiles } from '../modpacks/install.js';
+import { applyPackUpdate, packArchivePath } from '../modpacks/update.js';
 import { deleteStaged, getStaged, stagedFile, type StagedPack } from '../modpacks/store.js';
-import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
+import { applyRetention, backupFile, createBackup, extractWorld, listBackups, restoreBackup, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
 
 const ALL_TYPES: ServerType[] = [...JAVA_TYPES, 'BEDROCK'];
@@ -39,9 +40,6 @@ interface PortUse {
   /** Its server gave the port up; shown so the admin can see where it went. */
   released: boolean;
 }
-
-/** The original .mrpack of a modpack server, kept for updates and for sharing with players. */
-export const packArchive = (inst: ServerInstance) => path.join(inst.dir, '.modpack', 'pack.mrpack');
 
 export class ServerManager {
   instances = new Map<string, ServerInstance>();
@@ -507,7 +505,7 @@ export class ServerManager {
         mp.overrides = r.overrides;
         mp.baselinePending = true;
         await fsp.mkdir(path.join(inst.dir, '.modpack'), { recursive: true });
-        await fsp.copyFile(stagedFile(pack.id), packArchive(inst));
+        await fsp.copyFile(stagedFile(pack.id), packArchivePath(inst));
         await inst.save();
         await deleteStaged(pack.id).catch(() => {});
       }
@@ -641,6 +639,7 @@ export class ServerManager {
     if (inst.state === 'installing') throw conflict('Already installing');
     const rec = inst.rec;
     const newType = opts.type || rec.type;
+    if (rec.modpack && (newType !== rec.type || opts.version.trim() !== rec.version)) throw bad('This server follows its modpack; detach it first to change the Minecraft version');
     if ((newType === 'BEDROCK') !== (rec.edition === 'bedrock')) throw bad('Cannot switch between Java and Bedrock in place; create a new server and import the world.');
     const wasRunning = inst.isActive;
     const task = this.installTask(inst, `Install ${TYPE_NAMES[newType]} ${opts.version.trim()}`);
@@ -691,6 +690,20 @@ export class ServerManager {
         inst.errorDetail = msg;
       }
     })().catch(() => {});
+  }
+
+  /** Update a modpack server to another version of its pack (see modpacks/update.ts). */
+  async updateModpack(id: string, versionId: string) {
+    const inst = this.get(id);
+    return applyPackUpdate(inst, versionId, {
+      backup: async (i, label) => (await createBackup(inst, { label, scope: 'full' })).id,
+      restore: (i, backupId) => restoreBackup(inst, backupId),
+      reinstall: async (i, ctx) => {
+        const r = await installJava(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), undefined, ctx);
+        inst.rec.build = r.build;
+      },
+      start: () => this.startServer(inst.id),
+    });
   }
 
   /** Re-run the installer for the current version (repair). */

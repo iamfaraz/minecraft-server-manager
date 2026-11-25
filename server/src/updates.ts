@@ -9,6 +9,7 @@
  * Both are applied through the normal reinstall / version change, which stops a running server and starts it again.
  */
 import type { ServerInstance } from './servers/instance.js';
+import { checkPackUpdate, type PackUpdateInfo } from './modpacks/update.js';
 import { bedrockVersions } from './versions/bedrock.js';
 import { quiltLoaderFor, quiltLoaderJarUrl } from './versions/java.js';
 import { fabricServerJarUrl, forgeInstallerUrl, listJavaVersions, neoforgeInstallerUrl, paperDownloadUrl, vanillaServerUrl } from './versions/java.js';
@@ -23,6 +24,8 @@ export interface UpdateCheck {
   build: { available: boolean; unknown?: boolean; label: string } | null;
   /** The newest Minecraft version for this server type, if newer than the installed one. */
   version: { available: boolean; latest: string | null; label: string };
+  /** Modpack servers: the newest pack version (null when updates are ignored or the pack is not linked). */
+  modpack?: PackUpdateInfo | null;
 }
 
 /** What a fresh install of the current version would download, with a human label for the build. */
@@ -59,6 +62,16 @@ async function latestBuild(inst: ServerInstance): Promise<{ url: string; label: 
 
 export async function checkUpdates(inst: ServerInstance): Promise<UpdateCheck> {
   const rec = inst.rec;
+  if (rec.modpack) {
+    // The pack decides Minecraft and loader versions; only pack updates are offered.
+    return {
+      checkedAt: new Date().toISOString(),
+      current: { type: rec.type, version: rec.version, build: rec.build?.loaderVersion, installedAt: rec.build?.installedAt },
+      build: null,
+      version: { available: false, latest: null, label: 'Managed by the modpack' },
+      modpack: await checkPackUpdate(inst).catch(() => null),
+    };
+  }
   const current = { type: rec.type, version: rec.version, build: rec.build?.loaderVersion ?? /build[s/-]*(\d+)/i.exec(rec.build?.downloadUrl ?? '')?.[1], installedAt: rec.build?.installedAt };
 
   let build: UpdateCheck['build'] = null;
