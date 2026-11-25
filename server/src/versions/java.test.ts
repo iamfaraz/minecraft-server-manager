@@ -28,3 +28,5 @@ test('quiltInstallArgs builds server install command', () =>
 const quilt = [{ loader: { version: '0.28.0-beta.1' } }, { loader: { version: '0.27.1' } }, { loader: { version: '0.26.4' } }];
 test('pickQuiltLoader skips beta when unpinned', () => assert.equal(pickQuiltLoader(quilt), '0.27.1'));
 test('pickQuiltLoader returns pinned', () => assert.equal(pickQuiltLoader(quilt, '0.26.4'), '0.26.4'));
+test('pickQuiltLoader picks newest stable from an unsorted list', () =>
+  assert.equal(pickQuiltLoader([{ loader: { version: '0.20.0-beta.9' } }, { loader: { version: '0.24.0' } }, { loader: { version: '0.29.1' } }, { loader: { version: '0.29.2-beta.1' } }, { loader: { version: '0.28.0' } }]), '0.29.1'));

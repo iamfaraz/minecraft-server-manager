@@ -242,10 +242,10 @@ export async function installGeyser(rec: ServerRecord, root: string, onProgress:
   await fsp.mkdir(target, { recursive: true });
   const base = 'https://download.geysermc.org/v2/projects';
   onProgress(null, 'Downloading Geyser');
-  await downloadTo(`${base}/geyser/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `Geyser-${platform}.jar`), onProgress, ctx);
+  await downloadTo(`${base}/geyser/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `Geyser-${platform}.jar`), onProgress, { ...ctx, label: `Geyser-${platform}.jar` });
   onProgress(null, 'Downloading Floodgate');
   try {
-    await downloadTo(`${base}/floodgate/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `floodgate-${platform}.jar`), onProgress, ctx);
+    await downloadTo(`${base}/floodgate/versions/latest/builds/latest/downloads/${platform}`, path.join(target, `floodgate-${platform}.jar`), onProgress, { ...ctx, label: `floodgate-${platform}.jar` });
   } catch (e) {
     if (e instanceof CancelledError) throw e;
     onProgress(null, `Floodgate not available for ${platform} (${(e as Error).message}); Geyser installed without it`);

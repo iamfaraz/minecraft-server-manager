@@ -14,6 +14,8 @@ import { heldPorts, portNeeds, slotSpan, type PortConflict, type PortNeed, type 
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
 import { GEYSER_TYPES, JAVA_TYPES, TYPE_NAMES } from './types.js';
 import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
+import { installPackFiles } from '../modpacks/install.js';
+import { deleteStaged, getStaged, stagedFile, type StagedPack } from '../modpacks/store.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
 
@@ -37,6 +39,9 @@ interface PortUse {
   /** Its server gave the port up; shown so the admin can see where it went. */
   released: boolean;
 }
+
+/** The original .mrpack of a modpack server, kept for updates and for sharing with players. */
+export const packArchive = (inst: ServerInstance) => path.join(inst.dir, '.modpack', 'pack.mrpack');
 
 export class ServerManager {
   instances = new Map<string, ServerInstance>();
@@ -377,6 +382,14 @@ export class ServerManager {
   /* ---------------------------- create ---------------------------- */
 
   async create(input: CreateServerInput): Promise<ServerSummary> {
+    // A modpack decides the Minecraft version and loader.
+    let staged: StagedPack | null = null;
+    let packSkips: Record<string, boolean> = {};
+    if (input.modpack?.packId) {
+      staged = await getStaged(input.modpack.packId);
+      packSkips = { ...Object.fromEntries(staged.files.filter((f) => f.skip).map((f) => [f.path, true])), ...(input.modpack.skipOverrides || {}) };
+      input = { ...input, edition: 'java', type: staged.loader.type, version: staged.loader.mc, name: input.name?.trim() || staged.link?.title || staged.index.name };
+    }
     if (!input.name?.trim()) throw bad('Name is required');
     if (!ALL_TYPES.includes(input.type)) throw bad('Invalid server type');
     const edition = input.type === 'BEDROCK' ? 'bedrock' : 'java';
@@ -437,6 +450,23 @@ export class ServerManager {
       updatedAt: now,
     };
     if (geyser) rec.geyserPort = this.allocatePort('udp', undefined, 2);
+    if (staged) {
+      const link = input.modpack?.link !== false ? staged.link : null;
+      if (staged.loader.loaderVersion) rec.build = { pinnedLoaderVersion: staged.loader.loaderVersion };
+      rec.modpack = {
+        source: link ? 'modrinth' : 'upload',
+        projectId: link?.projectId,
+        slug: link?.slug,
+        title: link?.title || staged.index.name,
+        icon: link?.icon,
+        versionId: link?.versionId,
+        versionNumber: link?.versionNumber || staged.index.versionId,
+        files: [],
+        overrides: [],
+        skips: packSkips,
+        updates: { mode: 'notify' },
+      };
+    }
 
     await fsp.mkdir(serverRoot(id), { recursive: true });
     await fsp.mkdir(serverBackupsDir(id), { recursive: true });
@@ -446,7 +476,8 @@ export class ServerManager {
     bus.publish({ type: 'server.changed', id });
 
     // Install asynchronously; the UI follows progress over the websocket.
-    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall, importMeta?.id).catch(() => {});
+    const pack = staged ? { id: staged.id, projectIds: Object.fromEntries(staged.files.filter((f) => f.projectId).map((f) => [f.path, f.projectId!])) } : undefined;
+    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall, importMeta?.id, pack).catch(() => {});
     return inst.summary();
   }
 
@@ -454,12 +485,32 @@ export class ServerManager {
     return downloads.startTask({ label: `${label} · ${inst.rec.name}`, serverId: inst.id, kind: 'server-install', retry: () => this.reinstall(inst.id) });
   }
 
-  private async installAndMaybeStart(inst: ServerInstance, props: Record<string, string> | undefined, source: ServerInstance | null, backupId: string | undefined, startAfter: boolean, importId?: string) {
+  private async installAndMaybeStart(
+    inst: ServerInstance,
+    props: Record<string, string> | undefined,
+    source: ServerInstance | null,
+    backupId: string | undefined,
+    startAfter: boolean,
+    importId?: string,
+    pack?: { id: string; projectIds: Record<string, string> },
+  ) {
     inst.setState('installing');
     inst.setProgress(null, 'Preparing');
-    const task = this.installTask(inst, `Install ${TYPE_NAMES[inst.rec.type]} ${inst.rec.version}`);
+    const mp = inst.rec.modpack;
+    const task = this.installTask(inst, pack && mp ? `Install modpack ${mp.title} ${mp.versionNumber}` : `Install ${TYPE_NAMES[inst.rec.type]} ${inst.rec.version}`);
     try {
       await this.doInstall(inst, props, task.ctx);
+      if (pack && mp) {
+        inst.setProgress(null, `Installing ${mp.title}`);
+        const r = await installPackFiles(inst.root, stagedFile(pack.id), mp.skips, task.ctx, (p, m) => inst.setProgress(p, m), { projectIds: pack.projectIds, log: (m) => inst.pushLog(m) });
+        mp.files = r.files;
+        mp.overrides = r.overrides;
+        mp.baselinePending = true;
+        await fsp.mkdir(path.join(inst.dir, '.modpack'), { recursive: true });
+        await fsp.copyFile(stagedFile(pack.id), packArchive(inst));
+        await inst.save();
+        await deleteStaged(pack.id).catch(() => {});
+      }
       if (importId) {
         inst.setProgress(null, 'Copying imported world');
         await applyImport(importId, inst.root, inst.rec.edition, inst.rec.levelName);

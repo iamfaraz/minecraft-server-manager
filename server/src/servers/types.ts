@@ -60,6 +60,8 @@ export interface ServerRecord {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  /** Set when the server was created from a modpack and still follows it. */
+  modpack?: import('../modpacks/install.js').ModpackRecord;
   /**
    * The server gave up its ports while stopped, so other servers may take them. It keeps the old numbers as a
    * preference: at the next start it gets them back if they are still free, and new ones otherwise.
@@ -127,4 +129,6 @@ export interface CreateServerInput {
   restartOnCrash?: boolean;
   importWorld?: { sourceServerId?: string; backupId?: string; importId?: string };
   startAfterInstall?: boolean;
+  /** Create from a staged modpack: its Minecraft version and loader replace `type`/`version`. */
+  modpack?: { packId: string; skipOverrides?: Record<string, boolean>; link?: boolean };
 }

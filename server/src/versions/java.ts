@@ -140,7 +140,10 @@ export function pickQuiltLoader(list: { loader: { version: string } }[], pinned?
     if (!list.some((l) => l.loader?.version === pinned)) throw new Error(`No Quilt loader ${pinned} for this Minecraft version`);
     return pinned;
   }
-  const v = (list.find((l) => !/-(beta|pre|alpha)/i.test(l.loader?.version)) || list[0])?.loader?.version;
+  // Quilt meta does not sort this list.
+  const all = list.map((l) => l.loader?.version).filter(Boolean);
+  const stable = all.filter((v) => !/-(beta|pre|alpha|rc)/i.test(v));
+  const v = (stable.length ? stable : all).sort(compareVersions).pop();
   if (!v) throw new Error('No Quilt loader for this Minecraft version');
   return v;
 }
