@@ -110,3 +110,88 @@ test('cancel via signal', async () => {
   assert.equal(m.jobs().at(-1)!.state, 'cancelled');
   assert.equal(await exists(`${d}.part`), false);
 });
+
+/* ---------------- Task 3: tasks, history, events, util ---------------- */
+import { sweepPartials, wireBus } from './downloads.js';
+import { EventEmitter } from 'node:events';
+
+test('cancelTask aborts all jobs in task', async () => {
+  const m = mk({ stallMs: 2000 });
+  const t = m.startTask({ label: 'T', kind: 'server-install' });
+  const ps = [m.download(`${fx.url}/slow/30001`, dest(), t.ctx), m.download(`${fx.url}/slow/30002`, dest(), t.ctx)];
+  setTimeout(() => m.cancelTask(t.id), 150);
+  for (const p of ps) await assert.rejects(p, CancelledError);
+  assert.equal(m.snapshot().tasks.find((x) => x.id === t.id)!.state, 'cancelled');
+});
+
+test('trackProcess signal aborts on cancel', async () => {
+  const m = mk();
+  const t = m.startTask({ label: 'T', kind: 'server-install' });
+  const proc = m.trackProcess(t.id, 'Forge installer: downloading libraries');
+  assert.equal(m.snapshot().jobs.find((j) => j.indeterminate)!.state, 'active');
+  m.cancelTask(t.id);
+  assert.equal(proc.signal.aborted, true);
+});
+
+test('cancelJob cancels its task', async () => {
+  const m = mk({ stallMs: 2000 });
+  const t = m.startTask({ label: 'T', kind: 'addon' });
+  const p = m.download(`${fx.url}/slow/30003`, dest(), t.ctx);
+  await new Promise((r) => setTimeout(r, 100));
+  m.cancelJob(m.snapshot().jobs.at(-1)!.id);
+  await assert.rejects(p, CancelledError);
+  assert.equal(m.snapshot().tasks.find((x) => x.id === t.id)!.state, 'cancelled');
+});
+
+test('retryTask calls retry callback', async () => {
+  const m = mk();
+  let calls = 0;
+  const t = m.startTask({ label: 'T', kind: 'addon', retry: async () => void calls++ });
+  t.fail(new Error('x'));
+  const t2 = m.startTask({ label: 'U', kind: 'addon' });
+  assert.equal(m.snapshot().tasks.find((x) => x.id === t.id)!.canRetry, true);
+  assert.equal(m.snapshot().tasks.find((x) => x.id === t2.id)!.canRetry, false);
+  await m.retryTask(t.id);
+  assert.equal(calls, 1);
+});
+
+test('history keeps last 100', async () => {
+  const m = mk();
+  for (let i = 0; i < 105; i++) await m.download(`${fx.url}/ok/10`, dest());
+  assert.equal(m.snapshot().jobs.filter((j) => j.finishedAt).length, 100);
+});
+
+test('publishes download.changed on bus', async () => {
+  const m = mk();
+  const fake = new EventEmitter() as EventEmitter & { publish(ev: unknown): void };
+  const seen: any[] = [];
+  fake.publish = (ev) => seen.push(ev);
+  wireBus(m, fake);
+  await m.download(`${fx.url}/ok/11`, dest());
+  const states = seen.filter((e) => e.type === 'download.changed' && e.job).map((e) => e.job.state);
+  assert.ok(states.includes('active'));
+  assert.ok(states.includes('done'));
+});
+
+test('reuses legacy cache file without hash', async () => {
+  const { downloadCached } = await import('./util.js');
+  const url = `${fx.url}/ok/777`;
+  const f = await downloadCached(url, undefined, '-legacy.bin');
+  await fsp.writeFile(f, 'legacy');
+  const before = fx.hits['/ok/777'];
+  assert.equal(await downloadCached(url, undefined, '-legacy.bin'), f);
+  assert.equal(fx.hits['/ok/777'], before);
+  const good = crypto.createHash('sha1').update(fixtureBytes(777)).digest('hex');
+  await downloadCached(url, undefined, '-legacy.bin', { sha1: good });
+  assert.equal(fx.hits['/ok/777'], before + 1);
+  assert.deepEqual(await fsp.readFile(f), fixtureBytes(777));
+});
+
+test('sweepPartials removes stale .part files', async () => {
+  const d = await fsp.mkdtemp(path.join(os.tmpdir(), 'sweep-'));
+  await fsp.writeFile(path.join(d, 'a.jar.part'), 'x');
+  await fsp.writeFile(path.join(d, 'b.part'), 'x');
+  await fsp.writeFile(path.join(d, 'keep.jar'), 'x');
+  assert.equal(await sweepPartials(d), 2);
+  assert.deepEqual(await fsp.readdir(d), ['keep.jar']);
+});

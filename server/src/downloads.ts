@@ -42,6 +42,30 @@ export interface DownloadJob {
   finishedAt?: string;
 }
 
+export interface DownloadTask {
+  id: string;
+  label: string;
+  serverId?: string;
+  kind: OwnerKind;
+  state: 'active' | 'done' | 'failed' | 'cancelled';
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+  canRetry: boolean;
+  jobIds: string[];
+}
+
+export interface TaskHandle {
+  id: string;
+  signal: AbortSignal;
+  /** Pass to every download of this task. */
+  ctx: DownloadCtx;
+  done(): void;
+  fail(e: Error): void;
+}
+
+const HISTORY = 100;
+
 export class CancelledError extends Error {
   constructor(message = 'Cancelled') {
     super(message);
@@ -110,14 +134,94 @@ export class DownloadManager {
   private active = 0;
   private readonly waiting: (() => void)[] = [];
   private seq = 0;
+  private readonly taskMap = new Map<string, { t: DownloadTask; ctl: AbortController; retry?: () => Promise<void> }>();
+  private readonly jobCtl = new Map<string, AbortController>();
 
   constructor(opts: ManagerOptions = {}) {
     this.opts = { concurrency: 6, stallMs: 60_000, connectMs: 30_000, backoffMs: [2_000, 8_000, 20_000], ...opts };
     this.emitter.setMaxListeners(50);
   }
 
-  on(event: 'change', fn: (job: DownloadJob) => void): void {
+  on(event: 'change', fn: (job: DownloadJob) => void): void;
+  on(event: 'task', fn: (task: DownloadTask) => void): void;
+  on(event: 'change' | 'task', fn: (x: any) => void): void {
     this.emitter.on(event, fn);
+  }
+
+  snapshot(): { tasks: DownloadTask[]; jobs: DownloadJob[] } {
+    return { tasks: [...this.taskMap.values()].map((x) => ({ ...x.t, jobIds: [...x.t.jobIds] })), jobs: this.jobs() };
+  }
+
+  startTask(t: { label: string; serverId?: string; kind: OwnerKind; retry?: () => Promise<void> }): TaskHandle {
+    const id = `task${Date.now().toString(36)}${(++this.seq).toString(36)}`;
+    const ctl = new AbortController();
+    const task: DownloadTask = { id, label: t.label, serverId: t.serverId, kind: t.kind, state: 'active', startedAt: new Date().toISOString(), canRetry: !!t.retry, jobIds: [] };
+    this.taskMap.set(id, { t: task, ctl, retry: t.retry });
+    this.emitter.emit('task', task);
+    return {
+      id,
+      signal: ctl.signal,
+      ctx: { taskId: id, serverId: t.serverId, kind: t.kind, signal: ctl.signal },
+      done: () => this.endTask(id, 'done'),
+      fail: (e: Error) => this.endTask(id, e instanceof CancelledError || ctl.signal.aborted ? 'cancelled' : 'failed', e.message),
+    };
+  }
+
+  private endTask(id: string, state: DownloadTask['state'], error?: string): void {
+    const x = this.taskMap.get(id);
+    if (!x || x.t.state !== 'active') return;
+    x.t.state = state;
+    x.t.error = error;
+    x.t.finishedAt = new Date().toISOString();
+    this.emitter.emit('task', x.t);
+    this.trim();
+  }
+
+  cancelTask(id: string): void {
+    const x = this.taskMap.get(id);
+    if (!x) return;
+    x.ctl.abort();
+    for (const j of this.list) if (j.taskId === id && j.indeterminate && j.state === 'active') this.finish(j, 'cancelled', 'Cancelled');
+    this.endTask(id, 'cancelled', 'Cancelled');
+  }
+
+  cancelJob(id: string): void {
+    const job = this.list.find((j) => j.id === id);
+    if (!job) return;
+    if (job.taskId && this.taskMap.has(job.taskId)) return this.cancelTask(job.taskId);
+    this.jobCtl.get(id)?.abort();
+  }
+
+  async retryTask(id: string): Promise<void> {
+    const x = this.taskMap.get(id);
+    if (!x?.retry) throw new Error('This task cannot be retried');
+    await x.retry();
+  }
+
+  clearHistory(): void {
+    for (let i = this.list.length - 1; i >= 0; i--) if (this.list[i].finishedAt) this.list.splice(i, 1);
+    for (const [id, x] of this.taskMap) if (x.t.state !== 'active') this.taskMap.delete(id);
+  }
+
+  /** An install step whose downloads happen in a child process: shown without a percentage; cancel aborts `signal`. */
+  trackProcess(taskId: string, label: string): { signal: AbortSignal; end(ok: boolean, error?: string): void } {
+    const x = this.taskMap.get(taskId);
+    const signal = x?.ctl.signal ?? new AbortController().signal;
+    const job = this.newJob('', { taskId, label, kind: x?.t.kind, serverId: x?.t.serverId }, { indeterminate: true, state: 'active', attempt: 1 });
+    return {
+      signal,
+      end: (ok, error) => {
+        if (job.finishedAt) return;
+        this.finish(job, ok ? 'done' : signal.aborted ? 'cancelled' : 'failed', ok ? undefined : error);
+      },
+    };
+  }
+
+  private trim(): void {
+    const finished = this.list.filter((j) => j.finishedAt);
+    for (const j of finished.slice(0, Math.max(0, finished.length - HISTORY))) this.list.splice(this.list.indexOf(j), 1);
+    const done = [...this.taskMap.values()].filter((x) => x.t.state !== 'active');
+    for (const x of done.slice(0, Math.max(0, done.length - HISTORY))) this.taskMap.delete(x.t.id);
   }
 
   jobs(): DownloadJob[] {
@@ -151,7 +255,9 @@ export class DownloadManager {
   }
 
   /** Hook for subclasses (task bookkeeping). */
-  protected onNewJob(_job: DownloadJob): void {}
+  protected onNewJob(job: DownloadJob): void {
+    if (job.taskId) this.taskMap.get(job.taskId)?.t.jobIds.push(job.id);
+  }
 
   protected finish(job: DownloadJob, state: 'done' | 'failed' | 'cancelled', error?: string): void {
     job.state = state;
@@ -159,14 +265,22 @@ export class DownloadManager {
     job.speedBps = 0;
     job.finishedAt = new Date().toISOString();
     this.emit(job);
+    this.trim();
   }
 
   download(url: string, dest: string, ctx: DownloadCtx = {}, onProgress?: Progress): Promise<void> {
     const key = path.resolve(dest);
     const existing = this.inflight.get(key);
     if (existing) return existing;
-    const job = this.newJob(url, ctx);
-    const p = this.run(job, key, ctx, onProgress).finally(() => this.inflight.delete(key));
+    const task = ctx.taskId ? this.taskMap.get(ctx.taskId) : undefined;
+    const ctl = new AbortController();
+    const signals = [ctl.signal, ...(ctx.signal ? [ctx.signal] : []), ...(task ? [task.ctl.signal] : [])];
+    const job = this.newJob(url, { ...ctx, serverId: ctx.serverId ?? task?.t.serverId, kind: ctx.kind ?? task?.t.kind });
+    this.jobCtl.set(job.id, ctl);
+    const p = this.run(job, key, { ...ctx, signal: AbortSignal.any(signals) }, onProgress).finally(() => {
+      this.inflight.delete(key);
+      this.jobCtl.delete(job.id);
+    });
     this.inflight.set(key, p);
     return p;
   }
@@ -354,3 +468,34 @@ export class DownloadManager {
 }
 
 export const downloads = new DownloadManager();
+
+/** Remove `*.part` files left by downloads that were interrupted (e.g. the app was stopped). */
+export async function sweepPartials(dir: string): Promise<number> {
+  let n = 0;
+  let entries: string[] = [];
+  try {
+    entries = await fsp.readdir(dir);
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    if (!e.endsWith('.part')) continue;
+    await fsp.rm(path.join(dir, e), { force: true });
+    n++;
+  }
+  return n;
+}
+
+/** Forward job and task changes to the websocket bus; progress-only updates at most every 300 ms per job. */
+export function wireBus(m: DownloadManager, bus: { publish(ev: any): void }): void {
+  const last = new Map<string, { at: number; state: JobState }>();
+  m.on('change', (job) => {
+    const prev = last.get(job.id);
+    const now = Date.now();
+    if (prev && prev.state === job.state && now - prev.at < 300) return;
+    last.set(job.id, { at: now, state: job.state });
+    if (job.finishedAt) last.delete(job.id);
+    bus.publish({ type: 'download.changed', job: { ...job } });
+  });
+  m.on('task', (task) => bus.publish({ type: 'download.changed', task: { ...task, jobIds: [...task.jobIds] } }));
+}

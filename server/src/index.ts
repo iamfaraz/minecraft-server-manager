@@ -17,6 +17,8 @@ import { serverRoutes } from './routes/servers.js';
 import { miscRoutes } from './routes/misc.js';
 import { contentRoutes } from './routes/content.js';
 import { wsRoutes } from './ws.js';
+import { downloads, sweepPartials, wireBus } from './downloads.js';
+import { bus } from './events.js';
 
 async function main() {
   await loadAppConfig();
@@ -52,6 +54,8 @@ async function main() {
     app.log.warn(`Web UI build not found at ${config.webDist}; API only (run the Vite dev server for the UI)`);
   }
 
+  await sweepPartials(config.cacheDir);
+  wireBus(downloads, bus);
   await manager.init();
   broadcaster.init((id) => manager.instances.get(id), () => [...manager.instances.values()]);
   initInventory((id) => manager.instances.get(id));
