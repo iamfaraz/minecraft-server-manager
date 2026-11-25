@@ -4,6 +4,10 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
+import { CancelledError, downloads, withTask } from './downloads.js';
+import { quiltInstallerUrl } from './versions/java.js';
+import { replacePackFile } from './modpacks/ownership.js';
+import { TYPE_NAMES } from './servers/types.js';
 import { fetchJson, downloadTo, exists, readJson, rmrf, run, which, writeJson, bad, notFound, HttpError, fmtBytes } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -19,6 +23,7 @@ const LOADERS: Record<string, string[]> = {
   PAPER: ['paper', 'spigot', 'bukkit'],
   PURPUR: ['purpur', 'paper', 'spigot', 'bukkit'],
   FABRIC: ['fabric'],
+  QUILT: ['quilt', 'fabric'],
   FORGE: ['forge'],
   NEOFORGE: ['neoforge'],
 };
@@ -167,7 +172,10 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
   const manifestFile = path.join(inst.dir, 'addons.json');
   const manifest = await readJson<Record<string, any>>(manifestFile, {});
   const updated: { from: string; to: string; version: string }[] = [];
+  const task = targets.length ? downloads.startTask({ label: `Update mods · ${inst.rec.name}`, serverId: inst.id, kind: 'mod-update', retry: () => applyUpdates(inst, fileNames, log).then(() => {}) }) : null;
+  let failed = 0;
   for (const t of targets) {
+    if (task?.signal.aborted) break;
     if (!t.latestFileUrl || !t.latestFileName) continue;
     const disabled = t.fileName.endsWith('.disabled');
     const newName = path.basename(t.latestFileName) + (disabled ? '.disabled' : '');
@@ -176,18 +184,25 @@ export async function applyUpdates(inst: ServerInstance, fileNames: string[] | '
     log?.(`Updating ${t.title || t.fileName} → ${t.latestVersion}`);
     progress(inst.id, t.fileName, 0, `Downloading ${t.latestVersion}`);
     try {
-      await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg));
+      await downloadTo(t.latestFileUrl, `${dest}.new`, (pct, msg) => progress(inst.id, t.fileName, pct, msg), { ...task!.ctx, label: newName });
       await fsp.rm(path.join(inst.root, dir, t.fileName), { force: true });
       await fsp.rename(`${dest}.new`, dest);
+      await replacePackFile(inst, `${dir}/${t.fileName}`, `${dir}/${newName}`);
     } catch (e) {
       progress(inst.id, t.fileName, null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
       await fsp.rm(`${dest}.new`, { force: true });
+      failed++;
       continue;
     }
     progress(inst.id, t.fileName, 100, `Updated to ${t.latestVersion}`, { done: true, newFileName: newName });
     delete manifest[t.fileName.replace(/\.disabled$/, '')];
     manifest[newName.replace(/\.disabled$/, '')] = { projectId: t.projectId, versionId: t.latestVersionId, title: t.title, icon: t.icon, slug: t.slug };
     updated.push({ from: t.fileName, to: newName, version: t.latestVersion || '' });
+  }
+  if (task) {
+    if (task.signal.aborted) task.fail(new CancelledError());
+    else if (failed) task.fail(new Error(`${failed} of ${targets.length} updates failed`));
+    else task.done();
   }
   await writeJson(manifestFile, manifest);
   cache.delete(inst.id);
@@ -248,6 +263,10 @@ async function loaderInstaller(inst: ServerInstance): Promise<{ url: string; fil
       if (!v) return null;
       return { url: `https://maven.fabricmc.net/net/fabricmc/fabric-installer/${v}/fabric-installer-${v}.jar`, fileName: `fabric-installer-${v}.jar`, label: `Fabric installer ${v} (choose Minecraft ${mc}${lv ? `, loader ${lv}` : ''})` };
     }
+    case 'QUILT': {
+      const q = await quiltInstallerUrl();
+      return { url: q.url, fileName: `quilt-installer-${q.version}.jar`, label: `Quilt installer ${q.version} (choose Minecraft ${mc}${lv ? `, loader ${lv}` : ''})` };
+    }
     case 'FORGE':
       if (!lv) return null;
       return { url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${mc}-${lv}/forge-${mc}-${lv}-installer.jar`, fileName: `forge-${mc}-${lv}-installer.jar`, label: `Forge ${lv} installer for Minecraft ${mc}` };
@@ -264,7 +283,7 @@ export async function buildClientPack(
   opts: { files: string[]; includeInstaller: boolean; serverAddress?: string },
   log?: (m: string) => void,
 ): Promise<ClientPackMeta> {
-  if (!MOD_TYPES.includes(inst.rec.type)) throw bad('Client packs are only meaningful for modded (Fabric/Forge/NeoForge) servers');
+  if (!MOD_TYPES.includes(inst.rec.type)) throw bad('Client packs are only meaningful for modded (Fabric/Quilt/Forge/NeoForge) servers');
   const dir = extensionDir(inst.rec)!;
   const files = [...new Set(opts.files)].filter((f) => /^[^/\\]+\.jar$/i.test(f));
   if (!files.length) throw bad('Select at least one mod');
@@ -281,17 +300,19 @@ export async function buildClientPack(
       if (inst2) {
         log?.(`Downloading ${inst2.label}`);
         await fsp.mkdir(path.join(stage, 'installer'), { recursive: true });
-        await downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName), (pct, msg) => progress(inst.id, 'client-pack', pct, msg));
+        await withTask({ label: `Client mod pack · ${inst.rec.name}`, serverId: inst.id, kind: 'system', retry: () => buildClientPack(inst, opts, log).then(() => {}) }, (ctx) =>
+          downloadTo(inst2.url, path.join(stage, 'installer', inst2.fileName), (pct, msg) => progress(inst.id, 'client-pack', pct, msg), ctx),
+        );
         installerLabel = inst2.label;
       }
     }
     progress(inst.id, 'client-pack', null, 'Compressing');
-    const loaderName = inst.rec.type === 'FABRIC' ? 'Fabric' : inst.rec.type === 'FORGE' ? 'Forge' : 'NeoForge';
+    const loaderName = TYPE_NAMES[inst.rec.type];
     const readme = [
       `${inst.rec.name} — client mods for Minecraft ${inst.rec.version} (${loaderName})`,
       '',
       `1. Install ${loaderName} for Minecraft ${inst.rec.version}${inst.rec.build?.loaderVersion ? ` (loader ${inst.rec.build.loaderVersion})` : ''}.`,
-      installerLabel ? `   The installer is in the installer/ folder: ${installerLabel}. Run it with Java and choose "Client".` : `   Download the installer from ${inst.rec.type === 'FABRIC' ? 'https://fabricmc.net/use/installer/' : inst.rec.type === 'FORGE' ? 'https://files.minecraftforge.net/' : 'https://neoforged.net/'}.`,
+      installerLabel ? `   The installer is in the installer/ folder: ${installerLabel}. Run it with Java and choose "Client".` : `   Download the installer from ${({ FABRIC: 'https://fabricmc.net/use/installer/', QUILT: 'https://quiltmc.org/en/install/', FORGE: 'https://files.minecraftforge.net/' } as Record<string, string>)[inst.rec.type] ?? 'https://neoforged.net/'}.`,
       '2. Copy everything from the mods/ folder into your .minecraft/mods folder',
       '   Windows: %APPDATA%\\.minecraft\\mods   macOS: ~/Library/Application Support/minecraft/mods   Linux: ~/.minecraft/mods',
       `3. Launch the ${loaderName} profile in the Minecraft launcher.`,

@@ -7,13 +7,18 @@ import { listServerIds, serverBackupsDir, serverDir, serverRecordFile, serverRoo
 import { bad, conflict, dirSize, exists, notFound, readJson, rmrf, slugify, uid, writeJson, HttpError } from '../util.js';
 import { installJava, installGeyser, removeGeyser } from '../install/java.js';
 import { installBedrock } from '../install/bedrock.js';
+import { geyserSupport, versionRange } from '../install/geyserSupport.js';
 import { recommendedJavaMajor } from '../versions/java.js';
 import { ServerInstance } from './instance.js';
 import { pingBedrock, pingJava, probeNetherNet } from './status.js';
 import { heldPorts, portNeeds, slotSpan, type PortConflict, type PortNeed, type PortSlot } from './ports.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
-import { JAVA_TYPES } from './types.js';
-import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
+import { GEYSER_TYPES, JAVA_TYPES, TYPE_NAMES } from './types.js';
+import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
+import { installPackFiles } from '../modpacks/install.js';
+import { applyPackUpdate, isUpdating, modpackReinstall, packArchivePath } from '../modpacks/update.js';
+import { deleteStaged, getStaged, stagedFile, type StagedPack } from '../modpacks/store.js';
+import { applyRetention, backupFile, createBackup, extractWorld, listBackups, restoreBackup, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
 
 const ALL_TYPES: ServerType[] = [...JAVA_TYPES, 'BEDROCK'];
@@ -293,10 +298,12 @@ export class ServerManager {
    * of them, this fails with a PORT_CONFLICT error describing who and offering a free port, and the caller can
    * retry with `resolve`: stop the servers in the way, let Blockhost pick new ports, or name the ports to use.
    */
-  async startServer(id: string, resolve?: StartResolve): Promise<void> {
+  async startServer(id: string, resolve?: StartResolve, fromPackUpdate = false): Promise<void> {
     const inst = this.get(id);
+    if (isUpdating(id) && !fromPackUpdate) throw conflict('The modpack is being updated');
     if (inst.isActive) throw conflict('Server is already running');
     if (inst.state === 'installing') throw conflict('Server is installing');
+    await this.fitGeyser(inst);
     let changed = this.reclaimPorts(inst);
     if (resolve?.mode === 'custom') {
       if (resolve.port !== undefined) this.setPort(inst, 'port', resolve.port, true);
@@ -376,6 +383,14 @@ export class ServerManager {
   /* ---------------------------- create ---------------------------- */
 
   async create(input: CreateServerInput): Promise<ServerSummary> {
+    // A modpack decides the Minecraft version and loader.
+    let staged: StagedPack | null = null;
+    let packSkips: Record<string, boolean> = {};
+    if (input.modpack?.packId) {
+      staged = await getStaged(input.modpack.packId);
+      packSkips = { ...Object.fromEntries(staged.files.filter((f) => f.skip).map((f) => [f.path, true])), ...(input.modpack.skipOverrides || {}) };
+      input = { ...input, edition: 'java', type: staged.loader.type, version: staged.loader.mc, name: input.name?.trim() || staged.link?.title || staged.index.name };
+    }
     if (!input.name?.trim()) throw bad('Name is required');
     if (!ALL_TYPES.includes(input.type)) throw bad('Invalid server type');
     const edition = input.type === 'BEDROCK' ? 'bedrock' : 'java';
@@ -412,7 +427,8 @@ export class ServerManager {
             extraArgs: input.java?.extraArgs ?? '',
           }
         : undefined;
-    const geyser = edition === 'java' && !!input.geyser && ['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(input.type);
+    const geyser = edition === 'java' && !!input.geyser && GEYSER_TYPES.includes(input.type);
+    if (geyser) await this.assertGeyserFits(input.type, input.version.trim());
     const rec: ServerRecord = {
       id,
       name: input.name.trim(),
@@ -436,6 +452,25 @@ export class ServerManager {
       updatedAt: now,
     };
     if (geyser) rec.geyserPort = this.allocatePort('udp', undefined, 2);
+    if (staged) {
+      const link = input.modpack?.link !== false ? staged.link : null;
+      if (staged.loader.loaderVersion) rec.build = { pinnedLoaderVersion: staged.loader.loaderVersion };
+      rec.modpack = {
+        source: link ? 'modrinth' : 'upload',
+        projectId: link?.projectId,
+        slug: link?.slug,
+        title: link?.title || staged.index.name,
+        icon: link?.icon,
+        versionId: link?.versionId,
+        versionNumber: link?.versionNumber || staged.index.versionId,
+        files: [],
+        overrides: [],
+        skips: packSkips,
+        updates: { mode: 'notify' },
+        // Kept until the pack is installed, so Retry/Repair can install it again.
+        stagedId: staged.id,
+      };
+    }
 
     await fsp.mkdir(serverRoot(id), { recursive: true });
     await fsp.mkdir(serverBackupsDir(id), { recursive: true });
@@ -445,15 +480,44 @@ export class ServerManager {
     bus.publish({ type: 'server.changed', id });
 
     // Install asynchronously; the UI follows progress over the websocket.
-    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall, importMeta?.id).catch(() => {});
+    const pack = staged ? { id: staged.id, projectIds: Object.fromEntries(staged.files.filter((f) => f.projectId).map((f) => [f.path, f.projectId!])) } : undefined;
+    this.installAndMaybeStart(inst, input.properties, source, input.importWorld?.backupId, !!input.startAfterInstall, importMeta?.id, pack).catch(() => {});
     return inst.summary();
   }
 
-  private async installAndMaybeStart(inst: ServerInstance, props: Record<string, string> | undefined, source: ServerInstance | null, backupId: string | undefined, startAfter: boolean, importId?: string) {
+  private installTask(inst: ServerInstance, label: string, retry: () => Promise<void> = () => this.reinstall(inst.id)) {
+    return downloads.startTask({ label: `${label} · ${inst.rec.name}`, serverId: inst.id, kind: 'server-install', retry });
+  }
+
+  private async installAndMaybeStart(
+    inst: ServerInstance,
+    props: Record<string, string> | undefined,
+    source: ServerInstance | null,
+    backupId: string | undefined,
+    startAfter: boolean,
+    importId?: string,
+    pack?: { id: string; projectIds: Record<string, string> },
+  ) {
     inst.setState('installing');
     inst.setProgress(null, 'Preparing');
+    const mp = inst.rec.modpack;
+    const task = this.installTask(inst, pack && mp ? `Install modpack ${mp.title} ${mp.versionNumber}` : `Install ${TYPE_NAMES[inst.rec.type]} ${inst.rec.version}`);
     try {
-      await this.doInstall(inst, props);
+      await this.doInstall(inst, props, task.ctx);
+      if (pack && mp) {
+        inst.setProgress(null, `Installing ${mp.title}`);
+        const r = await installPackFiles(inst.root, stagedFile(pack.id), mp.skips, task.ctx, (p, m) => inst.setProgress(p, m), { projectIds: pack.projectIds, log: (m) => inst.pushLog(m), properties: props });
+        mp.files = r.files;
+        mp.overrides = r.overrides;
+        if (inst.rec.geyser) await installGeyser(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), task.ctx);
+        mp.baselinePending = true;
+        await fsp.mkdir(path.join(inst.dir, '.modpack'), { recursive: true });
+        await fsp.copyFile(stagedFile(pack.id), packArchivePath(inst));
+        await inst.save();
+        delete mp.stagedId;
+        await inst.save();
+        await deleteStaged(pack.id).catch(() => {});
+      }
       if (importId) {
         inst.setProgress(null, 'Copying imported world');
         await applyImport(importId, inst.root, inst.rec.edition, inst.rec.levelName);
@@ -462,23 +526,49 @@ export class ServerManager {
       await inst.save();
       inst.install = null;
       bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Ready', done: true });
+      task.done();
       inst.setState('stopped');
       if (startAfter) await this.startServer(inst.id);
     } catch (e) {
-      const msg = (e as Error).message;
-      inst.pushLog(`[Blockhost] Install failed: ${msg}`);
+      task.fail(e as Error);
+      const msg = e instanceof CancelledError ? 'Install cancelled' : (e as Error).message;
+      inst.pushLog(e instanceof CancelledError ? '[Blockhost] Install cancelled' : `[Blockhost] Install failed: ${msg}`);
       bus.publish({ type: 'server.progress', id: inst.id, pct: null, message: msg, done: true, error: msg });
       inst.setState('error', msg);
     }
   }
 
-  private async doInstall(inst: ServerInstance, props?: Record<string, string>) {
+  /** Refuse cross-play where the newest Geyser does not run (it would crash the server on start). */
+  private async assertGeyserFits(type: ServerType, mc: string): Promise<void> {
+    const g = await geyserSupport(type, mc);
+    if (g.supported === false) throw bad(geyserUnsupportedMessage(type, mc, g.versions));
+  }
+
+  /**
+   * Turn cross-play off when the server's Minecraft version is one the newest Geyser does not run on (after a
+   * version change or pack update, or on servers set up before this check). Unknown (offline) leaves it alone.
+   */
+  private async fitGeyser(inst: ServerInstance): Promise<void> {
+    const rec = inst.rec;
+    if (rec.edition !== 'java' || !rec.geyser) return;
+    const g = await geyserSupport(rec.type, rec.version);
+    if (g.supported !== false) return;
+    await removeGeyser(rec, inst.root);
+    rec.geyser = false;
+    rec.geyserPort = undefined;
+    if (rec.broadcast?.enabled) rec.broadcast = { enabled: false };
+    await inst.save();
+    inst.pushLog(`[Blockhost] Cross-play turned off: ${geyserUnsupportedMessage(rec.type, rec.version, g.versions)}`);
+  }
+
+  private async doInstall(inst: ServerInstance, props?: Record<string, string>, ctx?: DownloadCtx) {
     const onProgress = (p: number | null, m: string) => inst.setProgress(p, m);
+    await this.fitGeyser(inst);
     if (inst.rec.edition === 'java') {
-      const r = await installJava(inst.rec, inst.root, onProgress, props);
+      const r = await installJava(inst.rec, inst.root, onProgress, props, ctx);
       inst.rec.build = r.build;
     } else {
-      const r = await installBedrock(inst.rec, inst.root, onProgress, props);
+      const r = await installBedrock(inst.rec, inst.root, onProgress, props, ctx);
       inst.rec.build = r.build;
       inst.rec.version = r.version;
     }
@@ -556,7 +646,8 @@ export class ServerManager {
       needsRestart.push('java');
     }
     if (rec.edition === 'java' && patch.geyser !== undefined && !!patch.geyser !== rec.geyser) {
-      if (!['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric or NeoForge');
+      if (!GEYSER_TYPES.includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric, Quilt or NeoForge');
+      if (patch.geyser) await this.assertGeyserFits(rec.type, rec.version);
       rec.geyser = !!patch.geyser;
       if (rec.geyser) {
         rec.geyserPort = patch.geyserPort || rec.geyserPort || this.allocatePort('udp', id, 2);
@@ -579,11 +670,14 @@ export class ServerManager {
   /** Change version and/or type in place. Worlds, configs, plugins and mods are kept. */
   async changeVersion(id: string, opts: { version: string; type?: ServerType; javaMajor?: number | 'auto'; backupFirst?: boolean }): Promise<void> {
     const inst = this.get(id);
-    if (inst.state === 'installing') throw conflict('Already installing');
+    if (inst.state === 'installing' || isUpdating(id)) throw conflict('Already installing');
     const rec = inst.rec;
     const newType = opts.type || rec.type;
+    if (rec.modpack && (newType !== rec.type || opts.version.trim() !== rec.version)) throw bad('This server follows its modpack; detach it first to change the Minecraft version');
     if ((newType === 'BEDROCK') !== (rec.edition === 'bedrock')) throw bad('Cannot switch between Java and Bedrock in place; create a new server and import the world.');
     const wasRunning = inst.isActive;
+    // Retry asks for the same change again (the record still names the old version after a failure).
+    const task = this.installTask(inst, `Install ${TYPE_NAMES[newType]} ${opts.version.trim()}`, () => this.changeVersion(id, { ...opts, backupFirst: false }));
     (async () => {
       try {
         if (wasRunning) {
@@ -607,7 +701,7 @@ export class ServerManager {
           // Re-evaluate auto-ness: if user had auto before keep auto; otherwise keep their explicit choice
         }
         try {
-          await this.doInstall(inst);
+          await this.doInstall(inst, undefined, task.ctx);
         } catch (e) {
           rec.version = prev.version;
           rec.type = prev.type;
@@ -617,13 +711,15 @@ export class ServerManager {
         rec.installed = true;
         await inst.save();
         inst.install = null;
+        task.done();
         bus.publish({ type: 'server.progress', id: inst.id, pct: 100, message: 'Updated', done: true });
         inst.setState('stopped');
         inst.pushLog(`[Blockhost] Now on ${rec.type} ${rec.version}`);
         if (wasRunning) await this.startServer(inst.id);
       } catch (e) {
-        const msg = (e as Error).message;
-        inst.pushLog(`[Blockhost] Update failed: ${msg}`);
+        task.fail(e as Error);
+        const msg = e instanceof CancelledError ? 'Install cancelled' : (e as Error).message;
+        inst.pushLog(e instanceof CancelledError ? '[Blockhost] Install cancelled' : `[Blockhost] Update failed: ${msg}`);
         bus.publish({ type: 'server.progress', id: inst.id, pct: null, message: msg, done: true, error: msg });
         inst.setState(rec.installed ? 'stopped' : 'error', msg);
         inst.errorDetail = msg;
@@ -631,9 +727,37 @@ export class ServerManager {
     })().catch(() => {});
   }
 
+  /** Update a modpack server to another version of its pack (see modpacks/update.ts). */
+  async updateModpack(id: string, versionId: string) {
+    const inst = this.get(id);
+    return applyPackUpdate(inst, versionId, {
+      backup: async (i, label) => (await createBackup(inst, { label, scope: 'full' })).id,
+      restore: (i, backupId) => restoreBackup(inst, backupId),
+      reinstall: async (i, ctx) => {
+        await this.fitGeyser(inst);
+        const r = await installJava(inst.rec, inst.root, (p, m) => inst.setProgress(p, m), undefined, ctx);
+        inst.rec.build = r.build;
+      },
+      start: () => this.startServer(inst.id, undefined, true),
+    });
+  }
+
   /** Re-run the installer for the current version (repair). */
   async reinstall(id: string): Promise<void> {
     const inst = this.get(id);
+    const mp = inst.rec.modpack;
+    if (mp) {
+      const what = modpackReinstall({ archive: await exists(packArchivePath(inst)), stagedId: mp.stagedId, staged: !!mp.stagedId && (await getStaged(mp.stagedId).then(() => true, () => false)) });
+      if (what === 'refuse') throw bad("This modpack server never finished installing and its pack file is gone. Delete it and create it again from the pack.");
+      if (what === 'pack') {
+        // The first install was interrupted: install the loader and the pack again from the staged file.
+        if (inst.isActive || inst.state === 'installing' || isUpdating(id)) throw conflict('Already installing');
+        const staged = await getStaged(mp.stagedId!);
+        const projectIds = Object.fromEntries(staged.files.filter((f) => f.projectId).map((f) => [f.path, f.projectId!]));
+        this.installAndMaybeStart(inst, undefined, null, undefined, false, undefined, { id: staged.id, projectIds }).catch(() => {});
+        return;
+      }
+    }
     await this.changeVersion(id, { version: inst.rec.version, backupFirst: false });
   }
 
@@ -651,6 +775,10 @@ export class ServerManager {
     for (const i of this.instances.values()) if (i.rec.java && i.isActive) t += i.rec.java.xmxMb;
     return t;
   }
+}
+
+function geyserUnsupportedMessage(type: ServerType, mc: string, versions: string[]): string {
+  return `Cross-play (Geyser) does not run on Minecraft ${mc} with ${TYPE_NAMES[type]}. The newest Geyser for ${TYPE_NAMES[type]} supports ${versionRange(versions)}.`;
 }
 
 export const manager = new ServerManager();

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { snapshotBaselines } from '../modpacks/ownership.js';
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
 import dgram from 'node:dgram';
@@ -162,6 +163,7 @@ export class ServerInstance extends EventEmitter {
     this.state = state;
     this.errorDetail = detail ?? (state === 'error' || state === 'crashed' ? this.errorDetail : null);
     bus.publish({ type: 'server.state', id: this.id, state, detail: this.errorDetail ?? undefined });
+    if (state === 'running' && this.rec.modpack?.baselinePending) snapshotBaselines(this).catch(() => {});
   }
 
   setProgress(pct: number | null, message: string) {

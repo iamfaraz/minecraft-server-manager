@@ -1,5 +1,6 @@
 import { deleteAllBackups } from '../storage.js';
 import { checkUpdates } from '../updates.js';
+import { detachPack, isUpdating, packArchivePath, setPackUpdateMode, skipPackVersion } from '../modpacks/update.js';
 import * as assets from '../inventory/assets.js';
 import * as inventory from '../inventory/index.js';
 import type { FastifyInstance } from 'fastify';
@@ -58,6 +59,7 @@ export async function contentRoutes(app: FastifyInstance) {
   });
   app.delete<{ Params: { id: string } }>('/api/servers/:id/backups', async (req) => ({ deleted: await deleteAllBackups(req.params.id) }));
   app.post<{ Params: { id: string; bid: string } }>('/api/servers/:id/backups/:bid/restore', async (req) => {
+    if (isUpdating(req.params.id)) throw bad('The modpack is being updated; try again when it finishes');
     await restoreBackup(manager.get(req.params.id), req.params.bid);
     return { ok: true };
   });
@@ -87,6 +89,39 @@ export async function contentRoutes(app: FastifyInstance) {
       await manager.changeVersion(inst.id, { version: req.body.version, backupFirst: true });
     } else await manager.changeVersion(inst.id, { version: inst.rec.version, backupFirst: false });
     return { ok: true, wasRunning };
+  });
+
+  /* ---------------- Modpack ---------------- */
+  app.get<{ Params: { id: string } }>('/api/servers/:id/modpack/update', async (req) => (await checkUpdates(manager.get(req.params.id))).modpack ?? null);
+  app.post<{ Params: { id: string }; Body: { versionId?: string } }>('/api/servers/:id/modpack/update', async (req) => {
+    if (!req.body?.versionId) throw bad('versionId is required');
+    return manager.updateModpack(req.params.id, req.body.versionId);
+  });
+  app.post<{ Params: { id: string }; Body: { versionId?: string } }>('/api/servers/:id/modpack/skip', async (req) => {
+    if (!req.body?.versionId) throw bad('versionId is required');
+    await skipPackVersion(manager.get(req.params.id), req.body.versionId);
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string }; Body: { mode?: 'notify' | 'ignore' } }>('/api/servers/:id/modpack/mode', async (req) => {
+    if (req.body?.mode !== 'notify' && req.body?.mode !== 'ignore') throw bad('mode must be notify or ignore');
+    await setPackUpdateMode(manager.get(req.params.id), req.body.mode);
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>('/api/servers/:id/modpack/detach', async (req) => {
+    await detachPack(manager.get(req.params.id));
+    return { ok: true };
+  });
+  app.get<{ Params: { id: string } }>('/api/servers/:id/modpack/file', async (req, reply) => {
+    const inst = manager.get(req.params.id);
+    if (!inst.rec.modpack) throw bad('This server is not following a modpack');
+    const f = packArchivePath(inst);
+    const st = await fs.promises.stat(f).catch(() => null);
+    if (!st) throw bad('The original pack file is not available');
+    const name = `${(inst.rec.modpack.slug || inst.rec.modpack.title).replace(/[^\w.-]+/g, '-')}-${inst.rec.modpack.versionNumber}.mrpack`;
+    reply.header('Content-Type', 'application/x-modrinth-modpack+zip');
+    reply.header('Content-Length', st.size);
+    reply.header('Content-Disposition', `attachment; filename="${name}"`);
+    return reply.send(fs.createReadStream(f));
   });
 
   /* ---------------- Inventories ---------------- */

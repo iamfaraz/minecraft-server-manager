@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { manager } from '../servers/manager.js';
 import { listJavaVersions, requiredJavaMajor } from '../versions/java.js';
 import { bedrockVersions } from '../versions/bedrock.js';
+import { geyserSupport, versionRange } from '../install/geyserSupport.js';
 import { bedrockSupport, listJavaRuntimes } from '../versions/runtime.js';
 import { JAVA_TYPES, type JavaType } from '../servers/types.js';
 import { bad } from '../util.js';
@@ -64,6 +65,12 @@ export async function miscRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/versions/bedrock', async () => bedrockVersions());
+  app.get<{ Querystring: { type?: string; version?: string } }>('/api/versions/geyser', async (req) => {
+    const { type, version } = req.query;
+    if (!type || !version) throw bad('type and version are required');
+    const g = await geyserSupport(type, version);
+    return { ...g, range: versionRange(g.versions) };
+  });
 
   /* ---------------- World imports ---------------- */
   /* ---------------- Storage ---------------- */

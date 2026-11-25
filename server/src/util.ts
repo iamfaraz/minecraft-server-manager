@@ -3,9 +3,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, type SpawnOptions } from 'node:child_process';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
 import { config } from './config.js';
+import { downloads, fileHash, type DownloadCtx, type Progress } from './downloads.js';
 
 export const UA = 'Blockhost-MinecraftServerManager/0.1 (+https://github.com)';
 
@@ -160,60 +159,32 @@ export async function fetchText(url: string, timeoutMs = 20_000): Promise<string
   }
 }
 
-export type Progress = (pct: number | null, message: string) => void;
+export type { Progress } from './downloads.js';
 
 /**
  * Download a URL to the cache (keyed by URL hash) and return the cached path.
- * Large downloads (BDS zips, JDKs) are only fetched once.
+ * Large downloads (BDS zips, JDKs) are only fetched once. With a known hash, a cached copy is checked first and
+ * fetched again if it does not match.
  */
-export async function downloadCached(url: string, onProgress?: Progress, ext?: string): Promise<string> {
+export async function downloadCached(url: string, onProgress?: Progress, ext?: string, ctx?: DownloadCtx): Promise<string> {
   const hash = crypto.createHash('sha1').update(url).digest('hex').slice(0, 16);
   const name = ext ? `${hash}${ext}` : `${hash}-${path.basename(new URL(url).pathname).slice(0, 60) || 'file'}`;
   const dest = path.join(config.cacheDir, name);
   if (await exists(dest)) {
-    onProgress?.(100, `Using cached ${path.basename(dest)}`);
-    return dest;
+    const want = ctx?.sha512 || ctx?.sha1;
+    if (!want || (await fileHash(dest, ctx?.sha512 ? 'sha512' : 'sha1')) === want.toLowerCase()) {
+      onProgress?.(100, `Using cached ${path.basename(dest)}`);
+      return dest;
+    }
+    await fsp.rm(dest, { force: true });
   }
-  await downloadTo(url, dest, onProgress);
+  await downloadTo(url, dest, onProgress, ctx);
   return dest;
 }
 
-export async function downloadTo(url: string, dest: string, onProgress?: Progress): Promise<void> {
-  await fsp.mkdir(path.dirname(dest), { recursive: true });
-  const tmp = `${dest}.part`;
-  const res = await fetch(url, {
-    headers: {
-      // minecraft.net CDN rejects non-browser user agents
-      'User-Agent':
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-      Accept: '*/*',
-    },
-    redirect: 'follow',
-  });
-  if (!res.ok || !res.body) throw new HttpError(502, `Download failed (${res.status}) for ${url}`);
-  const total = Number(res.headers.get('content-length') || 0);
-  let done = 0;
-  let lastEmit = 0;
-  let label = path.basename(new URL(url).pathname) || 'file';
-  try {
-    label = decodeURIComponent(label);
-  } catch {
-    /* keep raw */
-  }
-  const counter = new (await import('node:stream')).Transform({
-    transform(chunk, _enc, cb) {
-      done += chunk.length;
-      const now = Date.now();
-      if (now - lastEmit > 300) {
-        lastEmit = now;
-        onProgress?.(total ? Math.round((done / total) * 100) : null, `Downloading ${label} (${fmtBytes(done)}${total ? ' / ' + fmtBytes(total) : ''})`);
-      }
-      cb(null, chunk);
-    },
-  });
-  await pipeline(Readable.fromWeb(res.body as any), counter, fs.createWriteStream(tmp));
-  await fsp.rename(tmp, dest);
-  onProgress?.(100, `Downloaded ${label}`);
+/** Download through the shared download manager (tracked, retried, cancellable). */
+export async function downloadTo(url: string, dest: string, onProgress?: Progress, ctx?: DownloadCtx): Promise<void> {
+  await downloads.download(url, dest, ctx, onProgress);
 }
 
 export function fmtBytes(n: number): string {

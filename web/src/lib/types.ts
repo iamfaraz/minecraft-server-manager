@@ -1,17 +1,20 @@
 export type Edition = 'java' | 'bedrock';
-export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'FORGE' | 'NEOFORGE';
+export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'QUILT' | 'FORGE' | 'NEOFORGE';
 export type ServerType = JavaType | 'BEDROCK';
 export type ServerState = 'stopped' | 'installing' | 'starting' | 'running' | 'stopping' | 'crashed' | 'error';
 export type JvmPreset = 'aikar' | 'zgc' | 'none';
 export type BackupSchedule = 'off' | 'hourly' | '6h' | 'daily';
 export type BackupScope = 'world' | 'full';
 
-export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'FORGE', 'NEOFORGE'];
+export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
+export const MOD_TYPES: ServerType[] = ['FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
+export const GEYSER_TYPES: ServerType[] = ['PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'NEOFORGE'];
 export const TYPE_LABEL: Record<ServerType, string> = {
   VANILLA: 'Vanilla',
   PAPER: 'Paper',
   PURPUR: 'Purpur',
   FABRIC: 'Fabric',
+  QUILT: 'Quilt',
   FORGE: 'Forge',
   NEOFORGE: 'NeoForge',
   BEDROCK: 'Bedrock',
@@ -21,6 +24,7 @@ export const TYPE_BLURB: Record<ServerType, string> = {
   PAPER: 'High-performance fork with plugin support. Best default.',
   PURPUR: 'Paper fork with extra gameplay toggles.',
   FABRIC: 'Lightweight mod loader for modern versions.',
+  QUILT: 'Fabric-compatible mod loader; runs most Fabric mods.',
   FORGE: 'Classic mod loader with the largest mod library.',
   NEOFORGE: 'Modern Forge successor for 1.20.2+.',
   BEDROCK: 'Official Bedrock Dedicated Server for phones, consoles and Windows 10/11.',
@@ -78,6 +82,7 @@ export interface ServerSummary {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  modpack?: ModpackRecord;
   /** Gave up its ports while stopped; it gets ports again at the next start. */
   portsReleased?: boolean;
   backup: { schedule: BackupSchedule; keep: number; scope: BackupScope };
@@ -167,7 +172,43 @@ export type WsEvent =
   | { type: 'backup.changed'; id: string }
   | { type: 'broadcast'; id: string; status: any }
   | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
+  | { type: 'download.changed'; job?: DownloadJob; task?: DownloadTask }
   | { type: 'pong' };
+
+/* ---- downloads ---- */
+export type DownloadState = 'queued' | 'active' | 'verifying' | 'done' | 'failed' | 'cancelled';
+export interface DownloadJob {
+  id: string;
+  url: string;
+  label: string;
+  kind: string;
+  serverId?: string;
+  taskId?: string;
+  bytesDone: number;
+  bytesTotal: number | null;
+  speedBps: number;
+  state: DownloadState;
+  error?: string;
+  attempt: number;
+  indeterminate?: boolean;
+  startedAt: string;
+  finishedAt?: string;
+}
+export interface DownloadTask {
+  id: string;
+  label: string;
+  serverId?: string;
+  kind: string;
+  state: 'active' | 'done' | 'failed' | 'cancelled';
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+  canRetry: boolean;
+  jobIds: string[];
+  /** Kept by the server as jobs come and go, so they stay right after old jobs leave the history. */
+  files?: { total: number; done: number; failed: number };
+  bytesFinished?: number;
+}
 
 /* ---- ports ---- */
 export type PortSlot = 'port' | 'geyserPort';
@@ -263,6 +304,39 @@ export interface UpdateCheck {
   current: { type: string; version: string; build?: string; installedAt?: string };
   build: { available: boolean; unknown?: boolean; label: string } | null;
   version: { available: boolean; latest: string | null; label: string };
+  modpack?: PackUpdateInfo | null;
+}
+
+/* ---- modpacks ---- */
+export type SkipReason = 'pack-env' | 'modrinth-server-unsupported' | 'mod-metadata-client' | 'admin';
+export interface PackLink { projectId: string; slug: string; title: string; icon?: string; versionId: string; versionNumber: string; confidence: 'exact' | 'name-version' }
+export interface StagedPack {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  index: { name: string; versionId: string; summary?: string };
+  loader: { type: 'VANILLA' | 'FABRIC' | 'QUILT' | 'FORGE' | 'NEOFORGE'; mc: string; loaderVersion?: string };
+  link: PackLink | null;
+  files: { path: string; size: number; skip: boolean; reason?: SkipReason; projectId?: string }[];
+  overrideCount: number;
+  sidesChecked?: boolean;
+  downloadBytes: number;
+}
+export interface PackHit { projectId: string; slug: string; title: string; icon?: string; downloads: number; mcVersions: string[]; loaders: string[] }
+export interface PackVersion { id: string; name: string; versionNumber: string; type: string; mc: string[]; loaders: string[]; date: string; fileSize: number }
+export interface PackUpdateInfo { available: boolean; latest?: { versionId: string; versionNumber: string; mc: string; loaders: string[] }; changesMcVersion: boolean }
+export interface PackUpdateResult { added: number; updated: number; removed: number; configsUpdated: number; configsKept: string[]; adminKept: string[]; mcChanged: boolean; from: string; to: string; startError?: string }
+export interface ModpackRecord {
+  source: 'modrinth' | 'upload';
+  projectId?: string;
+  slug?: string;
+  title: string;
+  icon?: string;
+  versionId?: string;
+  versionNumber: string;
+  files: { path: string; sha1: string; projectId?: string; adminOwned?: boolean }[];
+  overrides: { path: string }[];
+  updates: { mode: 'notify' | 'ignore'; skippedVersionId?: string };
 }
 
 export interface StorageOverview {
@@ -275,4 +349,50 @@ export interface StorageOverview {
   runtimes: { name: string; key: string; bytes: number; inUse: boolean }[];
   imports: { id: string; name: string; edition: Edition; bytes: number; createdAt: string }[];
   playit: number;
+}
+
+/* ---- API access ---- */
+export type ApiRisk = 'harmless' | 'sensitive' | 'changes' | 'destructive';
+export interface ApiScope {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  risk: ApiRisk;
+  global?: boolean;
+  examples: string[];
+}
+export interface ApiPreset {
+  id: string;
+  label: string;
+  description: string;
+  scopes: string[];
+}
+export interface ApiTokenView {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  servers?: string[];
+  expiresAt?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  lastUsedIp?: string;
+  expired: boolean;
+}
+export interface ApiActivity {
+  at: string;
+  method: string;
+  path: string;
+  status: number;
+  ip?: string;
+}
+export interface ApiEndpoint {
+  method: 'GET' | 'POST';
+  path: string;
+  scope?: string;
+  summary: string;
+  body?: Record<string, unknown>;
+  query?: Record<string, string>;
+  websocket?: boolean;
 }

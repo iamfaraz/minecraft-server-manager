@@ -7,16 +7,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { loadAppConfig } from './store.js';
-import { HttpError } from './util.js';
+import { registerApi } from './app.js';
 import { manager } from './servers/manager.js';
 import { playit } from './playit.js';
 import { init as initInventory } from './inventory/index.js';
 import { broadcaster } from './broadcaster.js';
-import { authRoutes } from './routes/auth.js';
-import { serverRoutes } from './routes/servers.js';
-import { miscRoutes } from './routes/misc.js';
-import { contentRoutes } from './routes/content.js';
-import { wsRoutes } from './ws.js';
+import { downloads, sweepPartials, wireBus } from './downloads.js';
+import { bus } from './events.js';
 
 async function main() {
   await loadAppConfig();
@@ -27,20 +24,7 @@ async function main() {
   await app.register(multipart, { limits: { fileSize: 4 * 1024 * 1024 * 1024, files: 50_000 }, preservePath: true } as any);
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
 
-  app.setErrorHandler((err: any, _req, reply) => {
-    if (err instanceof HttpError) return reply.code(err.status).send({ ...err.data, error: err.message });
-    const anyErr = err as any;
-    if (anyErr.validation || anyErr.statusCode === 400) return reply.code(400).send({ error: err.message });
-    if (anyErr.statusCode === 413) return reply.code(413).send({ error: 'Upload too large' });
-    app.log.error(err);
-    reply.code(500).send({ error: err.message || 'Internal error' });
-  });
-
-  await app.register(authRoutes);
-  await app.register(serverRoutes);
-  await app.register(miscRoutes);
-  await app.register(contentRoutes);
-  await app.register(wsRoutes);
+  await registerApi(app);
 
   if (fs.existsSync(path.join(config.webDist, 'index.html'))) {
     await app.register(fastifyStatic, { root: config.webDist, prefix: '/', wildcard: false });
@@ -52,6 +36,10 @@ async function main() {
     app.log.warn(`Web UI build not found at ${config.webDist}; API only (run the Vite dev server for the UI)`);
   }
 
+  await sweepPartials(config.cacheDir);
+  // Pack files download straight into the server folder (<servers>/<id>/root/mods/…).
+  await sweepPartials(config.serversDir, 3);
+  wireBus(downloads, bus);
   await manager.init();
   broadcaster.init((id) => manager.instances.get(id), () => [...manager.instances.values()]);
   initInventory((id) => manager.instances.get(id));

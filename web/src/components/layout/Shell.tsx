@@ -1,10 +1,11 @@
 import { clsx } from 'clsx';
-import { Cable, Globe2, HardDrive, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
+import { Cable, Globe2, HardDrive, KeyRound, LayoutGrid, LogOut, Plus, Settings2, Server, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useServers } from '../../hooks/useServers';
 import { api } from '../../lib/api';
 import { StatusDot } from '../ui';
+import { DownloadsButton } from '../DownloadsPanel';
 
 export function Logo({ compact }: { compact?: boolean }) {
   return (
@@ -43,6 +44,7 @@ export function Shell({ user, onLogout }: { user: string; onLogout: () => void }
     <aside className="flex h-full w-[264px] shrink-0 flex-col border-r border-line bg-panel/60 backdrop-blur-xl">
       <div className="flex items-center justify-between px-5 py-5">
         <Logo />
+        <DownloadsButton className="hidden lg:block" />
         <button className="btn-ghost btn-sm lg:hidden" onClick={() => setOpen(false)}>
           <X className="size-4" />
         </button>
@@ -80,6 +82,9 @@ export function Shell({ user, onLogout }: { user: string; onLogout: () => void }
         <NavLink to="/storage" className={navClass} onClick={() => setOpen(false)}>
           <HardDrive className="size-4" /> Storage
         </NavLink>
+        <NavLink to="/api-access" className={navClass} onClick={() => setOpen(false)}>
+          <KeyRound className="size-4" /> API access
+        </NavLink>
         <NavLink to="/system" className={navClass} onClick={() => setOpen(false)}>
           <Settings2 className="size-4" /> System
         </NavLink>
@@ -111,6 +116,7 @@ export function Shell({ user, onLogout }: { user: string; onLogout: () => void }
             <Menu className="size-5" />
           </button>
           <Logo compact />
+          <DownloadsButton className="ml-auto" />
         </div>
         <div className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />

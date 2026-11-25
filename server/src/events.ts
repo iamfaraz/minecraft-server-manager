@@ -11,6 +11,7 @@ export type BusEvent =
   | { type: 'backup.changed'; id: string }
   | { type: 'broadcast'; id: string; status: unknown }
   | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
+  | { type: 'download.changed'; job?: import('./downloads.js').DownloadJob; task?: import('./downloads.js').DownloadTask }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string };
 
 class Bus extends EventEmitter {

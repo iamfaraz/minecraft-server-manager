@@ -5,6 +5,7 @@ import { getAppConfig, saveAppConfig } from './store.js';
 import { HttpError } from './util.js';
 import { generateRecoveryCodes, generateSecret, hashRecovery, otpauthUrl, verifyTotp } from './totp.js';
 import QRCode from 'qrcode';
+import { bearerFrom, tokenAuth } from './api/guard.js';
 
 const COOKIE = 'mcsm_session';
 const TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -170,8 +171,24 @@ export function userFromCookieHeader(header: string | undefined): string | null 
   return verifyToken(m ? decodeURIComponent(m[1]) : undefined);
 }
 
-/** Fastify preHandler: requires an authenticated session. */
+/**
+ * Fastify preHandler: the session cookie, or an access token with the permission the route needs. A request with an
+ * Authorization header is judged by its token alone.
+ */
 export async function requireAuth(req: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  const bearer = bearerFrom(req.headers.authorization);
+  if (bearer !== null) {
+    await tokenAuth(req, bearer);
+    return;
+  }
+  const user = userFromRequest(req);
+  if (!user) throw new HttpError(401, 'Not authenticated');
+  (req as any).user = user;
+}
+
+/** Fastify preHandler for account security and token management: the logged-in admin only, never a token. */
+export async function requireSession(req: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  if (req.headers.authorization !== undefined) throw new HttpError(403, 'Access tokens cannot manage the account or tokens');
   const user = userFromRequest(req);
   if (!user) throw new HttpError(401, 'Not authenticated');
   (req as any).user = user;

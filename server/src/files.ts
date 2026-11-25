@@ -1,4 +1,5 @@
 import fsp from 'node:fs/promises';
+import { markAdminOwned, relToRoot } from './modpacks/ownership.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { safeJoin, bad, HttpError } from './util.js';
@@ -63,6 +64,7 @@ export async function writeFile(inst: ServerInstance, rel: string, content: stri
   const p = await realInside(inst, rel);
   await fsp.mkdir(path.dirname(p), { recursive: true });
   await fsp.writeFile(p, content);
+  await markAdminOwned(inst, relToRoot(inst.root, p));
 }
 
 export async function writeFileBuffer(inst: ServerInstance, dirRel: string, name: string, data: Buffer): Promise<void> {
@@ -70,6 +72,7 @@ export async function writeFileBuffer(inst: ServerInstance, dirRel: string, name
   const dir = await realInside(inst, dirRel);
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, name), data);
+  await markAdminOwned(inst, relToRoot(inst.root, path.join(dir, name)));
 }
 
 export async function mkdir(inst: ServerInstance, rel: string): Promise<void> {
@@ -80,6 +83,7 @@ export async function remove(inst: ServerInstance, rel: string): Promise<void> {
   const p = await realInside(inst, rel);
   if (path.resolve(p) === path.resolve(inst.root)) throw bad('Cannot delete the server root');
   await fsp.rm(p, { recursive: true, force: true });
+  await markAdminOwned(inst, relToRoot(inst.root, p));
 }
 
 export async function rename(inst: ServerInstance, rel: string, newRel: string): Promise<void> {
@@ -87,6 +91,7 @@ export async function rename(inst: ServerInstance, rel: string, newRel: string):
   const b = await realInside(inst, newRel);
   await fsp.mkdir(path.dirname(b), { recursive: true });
   await fsp.rename(a, b);
+  await markAdminOwned(inst, relToRoot(inst.root, a));
 }
 
 export async function openForDownload(inst: ServerInstance, rel: string): Promise<{ stream: fs.ReadStream; name: string; size: number }> {

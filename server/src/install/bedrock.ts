@@ -59,13 +59,13 @@ export interface BedrockInstallResult {
   build: NonNullable<ServerRecord['build']>;
 }
 
-export async function installBedrock(rec: ServerRecord, root: string, onProgress: Progress, initialProps?: Record<string, string>): Promise<BedrockInstallResult> {
+export async function installBedrock(rec: ServerRecord, root: string, onProgress: Progress, initialProps?: Record<string, string>, ctx?: import('../downloads.js').DownloadCtx): Promise<BedrockInstallResult> {
   const support = await bedrockSupport();
   if (!support.supported) throw new Error(support.reason || 'Bedrock is not supported on this host');
   await fsp.mkdir(root, { recursive: true });
   onProgress(null, `Resolving Bedrock version ${rec.version}`);
   const resolved = await resolveBedrock(rec.version);
-  const zip = await downloadCached(resolved.url, onProgress, `-bds-${resolved.version}.zip`);
+  const zip = await downloadCached(resolved.url, onProgress, `-bds-${resolved.version}.zip`, ctx);
   const isUpdate = await exists(path.join(root, 'server.properties'));
   onProgress(null, isUpdate ? 'Updating server files (worlds and configs are preserved)' : 'Extracting server files');
   await extractZip(zip, root, isUpdate, onProgress);

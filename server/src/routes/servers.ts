@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import { requireAuth } from '../auth.js';
+import { visibleTo } from '../api/guard.js';
+import { tokens } from '../api/tokens.js';
 import { manager, type StartResolve } from '../servers/manager.js';
 import { HOST_MARK } from '../servers/hostlog.js';
 import { bad, PropertiesFile } from '../util.js';
@@ -18,7 +20,7 @@ export async function serverRoutes(app: FastifyInstance) {
     return s;
   };
 
-  app.get('/api/servers', async () => manager.list().map(withRemote));
+  app.get('/api/servers', async (req) => manager.list().filter((s) => visibleTo(req, s.id)).map(withRemote));
 
   app.post<{ Body: CreateServerInput }>('/api/servers', async (req, reply) => {
     const s = await manager.create(req.body);
@@ -32,6 +34,7 @@ export async function serverRoutes(app: FastifyInstance) {
 
   app.delete<{ Params: { id: string }; Querystring: { deleteFiles?: string } }>('/api/servers/:id', async (req) => {
     await manager.remove(req.params.id, req.query.deleteFiles !== 'false');
+    await tokens.forgetServer(req.params.id);
     return { ok: true };
   });
 

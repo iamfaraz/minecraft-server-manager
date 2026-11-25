@@ -10,6 +10,7 @@ import { ProgressBar } from '../../components/ui';
 import { api } from '../../lib/api';
 import { fmtBytes } from '../../lib/format';
 import type { ServerSummary } from '../../lib/types';
+import { MOD_TYPES, TYPE_LABEL } from '../../lib/types';
 import { Card, EmptyState, Spinner } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
@@ -189,7 +190,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
               <RefreshCw className={clsx('size-3.5', (updates.isFetching || recheck.isPending) && 'animate-spin')} /> Re-check
             </button>
             {report && report.updatesAvailable > 0 && (
-              <button className="btn-primary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate('all')}>
+              <button className="btn-primary btn-sm" disabled={applyUpdates.isPending} onClick={() => (!(report?.addons ?? []).some((x) => x.updateAvailable && packEntry(s, x.fileName)) || confirm(`Some of these mods are part of ${s.modpack?.title}. Updating them may stop players with the pack from joining. Continue?`)) && applyUpdates.mutate('all')}>
                 {applyUpdates.isPending ? <Spinner /> : <ArrowUpCircle className="size-3.5" />} Update all
               </button>
             )}
@@ -210,6 +211,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-2 truncate font-medium">
                     {a.title || a.fileName}
+                    {packBadge(s, a.fileName)}
                     {a.slug && <a className="text-muted hover:text-ink" href={`https://modrinth.com/${isMods ? 'mod' : 'plugin'}/${a.slug}`} target="_blank" rel="noreferrer"><ExternalLink className="size-3" /></a>}
                     {isMods && a.onModrinth && <span className={clsx('chip', a.recommendedForClient ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : SIDE_LABEL[a.clientSide].cls)}>{a.isLibrary && a.clientSide !== 'required' ? 'library · needed on client' : SIDE_LABEL[a.clientSide].text}</span>}
                   </p>
@@ -228,7 +230,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                 {busyKeys.has(a.fileName) || (progress[a.fileName] && !progress[a.fileName].done) ? (
                   <span className="flex items-center gap-1.5 text-xs text-muted"><Spinner /> {progress[a.fileName]?.pct != null ? `${progress[a.fileName].pct}%` : 'working'}</span>
                 ) : a.updateAvailable ? (
-                  <button className="btn-secondary btn-sm" disabled={applyUpdates.isPending} onClick={() => applyUpdates.mutate([a.fileName])}>
+                  <button className="btn-secondary btn-sm" disabled={applyUpdates.isPending} onClick={() => (!packEntry(s, a.fileName) || confirm(packWarning(s))) && applyUpdates.mutate([a.fileName])}>
                     <ArrowUpCircle className="size-3.5" /> Update
                   </button>
                 ) : a.onModrinth ? (
@@ -248,11 +250,11 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
           {!checked || !report ? (
             <p className="text-sm text-muted">Run <span className="text-ink">Check for updates</span> first. Mods are then sorted into ones players must install on their own game (for example Fabric API or content mods), optional client additions, and server-only mods.</p>
           ) : !clientMods.length ? (
-            <p className="text-sm text-muted">None of the installed mods need to be on the client. Players only need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}.</p>
+            <p className="text-sm text-muted">None of the installed mods need to be on the client. Players only need {TYPE_LABEL[s.type]} for Minecraft {s.version}.</p>
           ) : (
             <div className="space-y-4">
               <p className="text-sm text-muted">
-                Players need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}
+                Players need {TYPE_LABEL[s.type]} for Minecraft {s.version}
                 {s.build?.loaderVersion ? ` (loader ${s.build.loaderVersion})` : ''} plus the mods marked <span className="text-amber-300">needed on client</span>. Pick what to bundle; the zip includes a README with install steps{includeInstaller ? ' and the loader installer' : ''}.
               </p>
               <ul className="divide-y divide-line/60 rounded-xl border border-line">
@@ -265,7 +267,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                   </li>
                 ))}
               </ul>
-              <Toggle checked={includeInstaller} onChange={setIncludeInstaller} label={`Include the ${s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} installer`} description="Downloaded from the official Maven so players can set up the loader offline." />
+              <Toggle checked={includeInstaller} onChange={setIncludeInstaller} label={`Include the ${TYPE_LABEL[s.type]} installer`} description="Downloaded from the official Maven so players can set up the loader offline." />
               <div className="flex flex-wrap items-center gap-2">
                 <button className="btn-primary" disabled={build.isPending || !effectiveSelected.size} onClick={() => build.mutate()}>
                   {build.isPending ? <Spinner /> : <Download className="size-4" />} Build &amp; download client pack ({effectiveSelected.size})
@@ -319,6 +321,16 @@ function RequirePacks({ s }: { s: ServerSummary }) {
     />
   );
 }
+
+/** A mod file that came from this server's modpack (null when it did not). */
+function packEntry(s: ServerSummary, fileName: string) {
+  return s.modpack?.files.find((f) => f.path === `mods/${fileName.replace(/\.disabled$/, '')}`) ?? null;
+}
+const packWarning = (s: ServerSummary) => `This mod is part of ${s.modpack?.title}. Updating it may stop players with the pack from joining. Continue?`;
+const packBadge = (s: ServerSummary, fileName: string) => {
+  const e = packEntry(s, fileName);
+  return e ? <span className="chip border-emerald-400/30 bg-emerald-400/10 text-emerald-200" title={e.adminOwned ? 'Changed by you; pack updates leave it alone' : `Installed by ${s.modpack?.title}`}>{e.adminOwned ? 'from pack · changed' : 'from pack'}</span> : null;
+};
 
 export function Addons({ s }: { s: ServerSummary }) {
   const qc = useQueryClient();
@@ -386,7 +398,7 @@ export function Addons({ s }: { s: ServerSummary }) {
       </div>
     );
 
-  const isMods = java && ['FABRIC', 'FORGE', 'NEOFORGE'].includes(s.type);
+  const isMods = java && MOD_TYPES.includes(s.type);
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-2">
       {java && <ModTools s={s} isMods={isMods} />}
@@ -413,7 +425,7 @@ export function Addons({ s }: { s: ServerSummary }) {
                 <li key={a.fileName} className={clsx('flex items-center gap-3 px-5 py-3', !a.enabled && 'opacity-50')}>
                   {a.modrinth?.icon ? <img src={a.modrinth.icon} className="size-8 rounded-lg" alt="" /> : <div className="flex size-8 items-center justify-center rounded-lg bg-white/5"><Package className="size-4 text-muted" /></div>}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{a.modrinth?.title || a.fileName.replace(/\.jar(\.disabled)?$/, '')}</p>
+                    <p className="flex items-center gap-2 truncate text-sm font-medium">{a.modrinth?.title || a.fileName.replace(/\.jar(\.disabled)?$/, '')} {packBadge(s, a.fileName)}</p>
                     <p className="truncate font-mono text-[11px] text-muted">
                       {a.fileName} · {fmtBytes(a.size)}
                       {a.managed === 'geyser' && ' · managed by Cross-play setting'}
@@ -422,7 +434,7 @@ export function Addons({ s }: { s: ServerSummary }) {
                   <button className="btn-ghost btn-sm" title={a.enabled ? 'Disable' : 'Enable'} onClick={() => toggle.mutate({ file: a.fileName })}>
                     <Power className={clsx('size-3.5', a.enabled ? 'text-emerald-300' : '')} />
                   </button>
-                  <button className="btn-ghost btn-sm text-rose-300" onClick={() => confirm(`Delete ${a.fileName}?`) && remove.mutate(`file=${encodeURIComponent(a.fileName)}`)}>
+                  <button className="btn-ghost btn-sm text-rose-300" onClick={() => confirm(packEntry(s, a.fileName) ? `${a.fileName} is part of ${s.modpack?.title}. Removing it may stop players with the pack from joining, and pack updates will not put it back. Delete it?` : `Delete ${a.fileName}?`) && remove.mutate(`file=${encodeURIComponent(a.fileName)}`)}>
                     <Trash2 className="size-3.5" />
                   </button>
                 </li>

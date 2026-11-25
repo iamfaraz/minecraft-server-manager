@@ -73,7 +73,7 @@ export function Versions({ s }: { s: ServerSummary }) {
                 installed {s.build?.installedAt ? new Date(s.build.installedAt).toLocaleDateString() : '—'}
               </p>
             </div>
-            {latestAvailable && (
+            {latestAvailable && !s.modpack && (
               <span className={clsx('chip', upToDate ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300')}>{upToDate ? 'Up to date' : `${latestAvailable} available`}</span>
             )}
           </div>
@@ -95,6 +95,13 @@ export function Versions({ s }: { s: ServerSummary }) {
         </Card>
       </div>
 
+      {s.modpack ? (
+        <Card className="lg:col-span-3" title="Choose a version">
+          <p className="text-sm text-muted">
+            This server follows <span className="text-ink">{s.modpack.title}</span>, so the pack decides the Minecraft and loader versions. Pack updates show up under Updates. To pick versions yourself, detach the server from the modpack in Settings.
+          </p>
+        </Card>
+      ) : (
       <Card className="lg:col-span-3" title="Choose a version" padded={false} action={java && jv.data?.snapshots?.length ? <button className={clsx('text-xs', snapshots ? 'text-accent' : 'text-muted hover:text-ink')} onClick={() => setSnapshots(!snapshots)}>{snapshots ? 'Hide' : 'Show'} snapshots</button> : undefined}>
         <div className="space-y-4 p-4">
           {java && (
@@ -171,6 +178,7 @@ export function Versions({ s }: { s: ServerSummary }) {
           </div>
         </div>
       </Card>
+      )}
 
       <ConfirmModal
         open={confirmOpen}

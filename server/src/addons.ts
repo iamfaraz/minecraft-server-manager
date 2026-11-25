@@ -2,6 +2,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
+import { withTask } from './downloads.js';
+import { markAdminOwned, relToRoot } from './modpacks/ownership.js';
 import { downloadTo, exists, fetchJson, normalizePerms, parseJsonLoose, readJson, rmrf, safeJoin, writeJson, bad, HttpError } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -64,6 +66,7 @@ export async function saveAddonUpload(inst: ServerInstance, fileName: string, da
 
 export async function deleteAddon(inst: ServerInstance, fileName: string): Promise<void> {
   await fsp.rm(addonPath(inst, fileName), { force: true });
+  await markAdminOwned(inst, relToRoot(inst.root, addonPath(inst, fileName)));
   const m = await readJson<AddonManifest>(manifestFile(inst), {});
   delete m[fileName.replace(/\.disabled$/, '')];
   await writeJson(manifestFile(inst), m);
@@ -73,12 +76,15 @@ export async function toggleAddon(inst: ServerInstance, fileName: string): Promi
   const p = addonPath(inst, fileName);
   const target = fileName.endsWith('.disabled') ? p.replace(/\.disabled$/, '') : `${p}.disabled`;
   await fsp.rename(p, target);
+  // Disabling a pack mod is the admin's call; updates must not re-enable or replace it.
+  await markAdminOwned(inst, relToRoot(inst.root, p.replace(/\.disabled$/, '')));
 }
 
 const LOADERS: Record<string, string[]> = {
   PAPER: ['paper', 'spigot', 'bukkit'],
   PURPUR: ['purpur', 'paper', 'spigot', 'bukkit'],
   FABRIC: ['fabric'],
+  QUILT: ['quilt', 'fabric'],
   FORGE: ['forge'],
   NEOFORGE: ['neoforge'],
 };
@@ -137,7 +143,15 @@ export async function installModrinth(inst: ServerInstance, projectId: string, d
   const dest = addonPath(inst, path.basename(file.filename));
   log?.(`Downloading ${project.title} ${v.version_number}`);
   await fsp.mkdir(path.join(inst.root, dir), { recursive: true });
-  await downloadTo(file.url, dest, (pct, msg) => prog(pct, msg));
+  try {
+    await withTask(
+      { label: `Install ${project.title} · ${inst.rec.name}`, serverId: inst.id, kind: 'addon', retry: () => installModrinth(inst, projectId, depth, log).then(() => {}) },
+      (ctx) => downloadTo(file.url, dest, (pct, msg) => prog(pct, msg), { ...ctx, sha512: file.hashes?.sha512, sha1: file.hashes?.sha512 ? undefined : file.hashes?.sha1, label: path.basename(file.filename) }),
+    );
+  } catch (e) {
+    prog(null, `Failed: ${(e as Error).message}`, { done: true, error: (e as Error).message });
+    throw e;
+  }
   manifest[path.basename(file.filename)] = { projectId: project.id, versionId: v.id, title: project.title, icon: project.icon_url, slug: project.slug };
   await writeJson(manifestFile(inst), manifest);
   const installed = [project.title];

@@ -1,5 +1,5 @@
 export type Edition = 'java' | 'bedrock';
-export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'FORGE' | 'NEOFORGE';
+export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'QUILT' | 'FORGE' | 'NEOFORGE';
 export type ServerType = JavaType | 'BEDROCK';
 export type ServerState = 'stopped' | 'installing' | 'starting' | 'running' | 'stopping' | 'crashed' | 'error';
 export type JvmPreset = 'aikar' | 'zgc' | 'none';
@@ -7,9 +7,12 @@ export type BackupSchedule = 'off' | 'hourly' | '6h' | 'daily';
 export type BackupScope = 'world' | 'full';
 export type BedrockTransport = 'raknet' | 'nethernet';
 
-export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'FORGE', 'NEOFORGE'];
+export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
 export const PLUGIN_TYPES: ServerType[] = ['PAPER', 'PURPUR'];
-export const MOD_TYPES: ServerType[] = ['FABRIC', 'FORGE', 'NEOFORGE'];
+export const MOD_TYPES: ServerType[] = ['FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
+/** Server types Geyser can be installed on (Quilt uses the Fabric build). */
+export const GEYSER_TYPES: ServerType[] = ['PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'NEOFORGE'];
+export const TYPE_NAMES: Record<ServerType, string> = { VANILLA: 'Vanilla', PAPER: 'Paper', PURPUR: 'Purpur', FABRIC: 'Fabric', QUILT: 'Quilt', FORGE: 'Forge', NEOFORGE: 'NeoForge', BEDROCK: 'Bedrock' };
 
 export type LaunchSpec =
   | { kind: 'jar'; jar: string }
@@ -35,6 +38,8 @@ export interface ServerRecord {
   /** Resolved build info from the last install. */
   build?: {
     loaderVersion?: string;
+    /** Exact loader version to install (set by modpacks); otherwise the newest stable one is used. */
+    pinnedLoaderVersion?: string;
     installerVersion?: string;
     downloadUrl?: string;
     launch?: LaunchSpec;
@@ -55,6 +60,8 @@ export interface ServerRecord {
   restartOnCrash: boolean;
   geyser: boolean;
   geyserPort?: number;
+  /** Set when the server was created from a modpack and still follows it. */
+  modpack?: import('../modpacks/install.js').ModpackRecord;
   /**
    * The server gave up its ports while stopped, so other servers may take them. It keeps the old numbers as a
    * preference: at the next start it gets them back if they are still free, and new ones otherwise.
@@ -122,4 +129,6 @@ export interface CreateServerInput {
   restartOnCrash?: boolean;
   importWorld?: { sourceServerId?: string; backupId?: string; importId?: string };
   startAfterInstall?: boolean;
+  /** Create from a staged modpack: its Minecraft version and loader replace `type`/`version`. */
+  modpack?: { packId: string; skipOverrides?: Record<string, boolean>; link?: boolean };
 }

@@ -3,14 +3,16 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Check, Coffee, Gamepad2, Globe2, HardDriveDownload, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useGeyserSupport } from '../hooks/useGeyserSupport';
 import { useServers } from '../hooks/useServers';
 import { api } from '../lib/api';
 import { fmtMb } from '../lib/format';
-import { JAVA_TYPES, TYPE_BLURB, TYPE_LABEL, type BackupMeta, type Edition, type JavaType, type ServerType, type SystemInfo } from '../lib/types';
+import { GEYSER_TYPES, JAVA_TYPES, TYPE_BLURB, TYPE_LABEL, type BackupMeta, type Edition, type JavaType, type ServerType, type SystemInfo } from '../lib/types';
 import { Field, Segmented, Spinner, Toggle } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { fmtBytes } from '../lib/format';
-import { FolderOpen, Trash2, Upload } from 'lucide-react';
+import { FolderOpen, Package, Trash2, Upload } from 'lucide-react';
+import { ModpackStep, type ModpackChoice } from './newserver/ModpackStep';
 
 type Step = 0 | 1 | 2;
 
@@ -45,7 +47,7 @@ interface Form {
   pvp: boolean;
 }
 
-const GEYSER_OK: ServerType[] = ['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'];
+const GEYSER_OK: ServerType[] = GEYSER_TYPES;
 
 export function NewServer() {
   const nav = useNavigate();
@@ -55,6 +57,9 @@ export function NewServer() {
   const { data: sys } = useQuery({ queryKey: ['system'], queryFn: () => api.get<SystemInfo>('/api/system') });
 
   const [step, setStep] = useState<Step>(params.get('type') ? 1 : 0);
+  const [mode, setMode] = useState<'type' | 'modpack'>('type');
+  const [mp, setMp] = useState<ModpackChoice>({ pack: null, skipOverrides: {}, link: true });
+  const isPack = mode === 'modpack';
   const [busy, setBusy] = useState(false);
   const [versionQuery, setVersionQuery] = useState('');
   const [showSnapshots, setShowSnapshots] = useState(false);
@@ -93,13 +98,14 @@ export function NewServer() {
       pvp: true,
     };
   });
+  const geyser = useGeyserSupport(f.type, f.version);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
   const isJava = f.edition === 'java';
   const javaVersions = useQuery({
     queryKey: ['versions', 'java', f.type],
     queryFn: () => api.get<{ versions: string[]; latest: string | null; snapshots?: string[] }>(`/api/versions/java?type=${f.type}`),
-    enabled: isJava,
+    enabled: isJava && !isPack,
     staleTime: 600_000,
   });
   const bedrockVersions = useQuery({
@@ -109,8 +115,19 @@ export function NewServer() {
     staleTime: 600_000,
   });
 
+  // A chosen modpack decides the loader and Minecraft version, and suggests the name.
+  const autoName = useRef('');
   useEffect(() => {
-    if (f.version) return;
+    const p = mp.pack;
+    if (!isPack || !p) return;
+    const suggested = mp.link && p.link ? p.link.title : p.index.name;
+    // Replace the name only if the admin has not typed their own.
+    setF((x) => ({ ...x, edition: 'java', type: p.loader.type, version: p.loader.mc, name: !x.name || x.name === autoName.current ? suggested : x.name }));
+    autoName.current = suggested;
+  }, [isPack, mp.pack, mp.link]);
+
+  useEffect(() => {
+    if (isPack || f.version) return;
     if (isJava && javaVersions.data?.latest) set('version', javaVersions.data.latest);
     if (!isJava && bedrockVersions.data) set('version', 'LATEST');
   }, [isJava, javaVersions.data, bedrockVersions.data, f.version]);
@@ -186,9 +203,15 @@ export function NewServer() {
     const edition: Edition = type === 'BEDROCK' ? 'bedrock' : 'java';
     setF((x) => ({ ...x, type, edition, version: '', geyser: GEYSER_OK.includes(type) ? x.geyser : false, sourceServerId: x.edition === edition ? x.sourceServerId : '', worldMode: x.edition === edition ? x.worldMode : 'new', importId: x.edition === edition ? x.importId : '' }));
     setVersionQuery('');
+    setMode('type');
   };
 
-  const canNext = step === 0 ? true : step === 1 ? !!f.version && !!f.name.trim() : true;
+  const chooseModpack = () => {
+    setMode('modpack');
+    setF((x) => ({ ...x, edition: 'java', type: mp.pack?.loader.type ?? 'FABRIC', version: mp.pack?.loader.mc ?? '', xmxMb: Math.max(x.xmxMb, 4096), sourceServerId: x.edition === 'java' ? x.sourceServerId : '', importId: x.edition === 'java' ? x.importId : '' }));
+  };
+
+  const canNext = step === 0 ? true : step === 1 ? (isPack ? !!mp.pack : !!f.version) && !!f.name.trim() : true;
 
   const create = async () => {
     setBusy(true);
@@ -222,7 +245,7 @@ export function NewServer() {
         levelName: f.worldMode === 'import' && f.importSource === 'server' ? undefined : f.levelName || undefined,
         java: isJava ? { xmxMb: f.xmxMb, xmsMb: f.xmxMb, major: f.javaMajor, preset: f.preset, extraArgs: '' } : undefined,
         properties,
-        geyser: f.geyser,
+        geyser: f.geyser && !geyser.unsupported,
         transport: isJava ? undefined : f.transport,
         autoStart: f.autoStart,
         restartOnCrash: f.restartOnCrash,
@@ -237,6 +260,7 @@ export function NewServer() {
               : f.importId
                 ? { importId: f.importId }
                 : undefined,
+        modpack: isPack && mp.pack ? { packId: mp.pack.id, skipOverrides: mp.skipOverrides, link: mp.link } : undefined,
       });
       toast.success('Server created — installing now');
       nav(`/servers/${r.id}`);
@@ -286,11 +310,31 @@ export function NewServer() {
         <div className="fade-up space-y-5">
           <div>
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <Package className="size-4 text-emerald-300" /> Modpack
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <button
+                type="button"
+                onClick={chooseModpack}
+                className={clsx('card card-hover relative flex flex-col items-start gap-1.5 p-4 text-left transition', isPack && 'border-accent/50 bg-accent/[0.06] ring-2 ring-accent/20')}
+              >
+                {isPack && (
+                  <span className="absolute top-3 right-3 flex size-5 items-center justify-center rounded-full bg-accent text-emerald-950">
+                    <Check className="size-3" />
+                  </span>
+                )}
+                <span className="text-sm font-semibold">From a modpack</span>
+                <span className="text-xs text-muted">Upload a .mrpack or pick one from Modrinth. The pack sets the version and mods.</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
               <Coffee className="size-4 text-orange-300" /> Java Edition
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {JAVA_TYPES.map((t: JavaType) => (
-                <TypeCard key={t} type={t} selected={f.type === t} onClick={() => chooseType(t)} />
+                <TypeCard key={t} type={t} selected={!isPack && f.type === t} onClick={() => chooseType(t)} />
               ))}
             </div>
           </div>
@@ -299,7 +343,7 @@ export function NewServer() {
               <Gamepad2 className="size-4 text-sky-300" /> Bedrock Edition
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <TypeCard type="BEDROCK" selected={f.type === 'BEDROCK'} onClick={() => chooseType('BEDROCK')} disabled={sys ? !sys.bedrock.supported : false} note={sys && !sys.bedrock.supported ? sys.bedrock.reason : sys?.bedrock.emulated ? 'Runs through box64 emulation on this ARM host' : undefined} />
+              <TypeCard type="BEDROCK" selected={!isPack && f.type === 'BEDROCK'} onClick={() => chooseType('BEDROCK')} disabled={sys ? !sys.bedrock.supported : false} note={sys && !sys.bedrock.supported ? sys.bedrock.reason : sys?.bedrock.emulated ? 'Runs through box64 emulation on this ARM host' : undefined} />
             </div>
           </div>
         </div>
@@ -307,6 +351,11 @@ export function NewServer() {
 
       {step === 1 && (
         <div className="fade-up grid gap-5 lg:grid-cols-5">
+          {isPack ? (
+            <div className="lg:col-span-3">
+              <ModpackStep value={mp} onChange={setMp} />
+            </div>
+          ) : (
           <div className="card lg:col-span-2">
             <header className="flex items-center justify-between border-b border-line px-4 py-3">
               <h3 className="text-sm font-semibold">{TYPE_LABEL[f.type]} version</h3>
@@ -361,8 +410,9 @@ export function NewServer() {
               </div>
             )}
           </div>
+          )}
 
-          <div className="space-y-4 lg:col-span-3">
+          <div className={clsx('space-y-4', isPack ? 'lg:col-span-2' : 'lg:col-span-3')}>
             <div className="card space-y-4 p-5">
               <Field label="Server name">
                 <input className="input" placeholder="Survival with friends" value={f.name} onChange={(e) => set('name', e.target.value)} autoFocus />
@@ -416,7 +466,13 @@ export function NewServer() {
                     />
                   </Field>
                   {GEYSER_OK.includes(f.type) && (
-                    <Toggle checked={f.geyser} onChange={(v) => set('geyser', v)} label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>} description="Lets phones, consoles and Windows 10/11 players join this Java server. Uses two consecutive ports from the Bedrock range (RakNet + NetherNet)." />
+                    <Toggle
+                      checked={f.geyser && !geyser.unsupported}
+                      disabled={geyser.unsupported}
+                      onChange={(v) => set('geyser', v)}
+                      label={<span className="flex items-center gap-2"><Globe2 className="size-4 text-sky-300" /> Cross-play with Bedrock (Geyser + Floodgate)</span>}
+                      description={geyser.reason ?? 'Lets phones, consoles and Windows 10/11 players join this Java server. Uses two consecutive ports from the Bedrock range (RakNet + NetherNet).'}
+                    />
                   )}
                 </>
               )}
@@ -622,7 +678,7 @@ export function NewServer() {
           </button>
         ) : (
           <button className="btn-primary" disabled={busy || (f.worldMode === 'import' && (f.importSource === 'server' ? !f.sourceServerId : !f.importId))} onClick={create}>
-            {busy && <Spinner />} Create {TYPE_LABEL[f.type]} {f.version && isJava ? f.version : ''} server
+            {busy && <Spinner />} {isPack && mp.pack ? `Create ${f.name.trim() || mp.pack.index.name} server` : `Create ${TYPE_LABEL[f.type]} ${f.version && isJava ? f.version : ''} server`}
           </button>
         )}
       </div>

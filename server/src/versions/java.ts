@@ -105,10 +105,19 @@ async function fabricVersions(): Promise<{ versions: string[]; snapshots: string
     snapshots: d.filter((x) => !x.stable).map((x) => x.version),
   };
 }
-export async function fabricServerJarUrl(version: string): Promise<{ url: string; loader: string; installer: string }> {
+export function pickFabricLoader(list: { loader: { version: string; stable?: boolean } }[], pinned?: string): string {
+  if (pinned) {
+    if (!list.some((l) => l.loader?.version === pinned)) throw new Error(`No Fabric loader ${pinned} for this Minecraft version`);
+    return pinned;
+  }
+  const v = (list.find((l) => l.loader?.stable) || list[0])?.loader?.version;
+  if (!v) throw new Error('No Fabric loader for this Minecraft version');
+  return v;
+}
+
+export async function fabricServerJarUrl(version: string, pinned?: string): Promise<{ url: string; loader: string; installer: string }> {
   const loaders = await fetchJson<any[]>(`https://meta.fabricmc.net/v2/versions/loader/${version}`);
-  const loader = (loaders.find((l) => l.loader?.stable) || loaders[0])?.loader?.version;
-  if (!loader) throw new Error(`No Fabric loader for ${version}`);
+  const loader = pickFabricLoader(loaders, pinned);
   const installers = await fetchJson<any[]>('https://meta.fabricmc.net/v2/versions/installer');
   const installer = (installers.find((i) => i.stable) || installers[0])?.version;
   return {
@@ -116,6 +125,44 @@ export async function fabricServerJarUrl(version: string): Promise<{ url: string
     loader,
     installer,
   };
+}
+
+/* ---------------- Quilt ---------------- */
+const QUILT_META = 'https://meta.quiltmc.org/v3';
+
+async function quiltVersions(): Promise<{ versions: string[]; snapshots: string[] }> {
+  const d = await fetchJson<{ version: string; stable: boolean }[]>(`${QUILT_META}/versions/game`);
+  return { versions: d.filter((x) => x.stable).map((x) => x.version), snapshots: d.filter((x) => !x.stable).map((x) => x.version) };
+}
+
+export function pickQuiltLoader(list: { loader: { version: string } }[], pinned?: string): string {
+  if (pinned) {
+    if (!list.some((l) => l.loader?.version === pinned)) throw new Error(`No Quilt loader ${pinned} for this Minecraft version`);
+    return pinned;
+  }
+  // Quilt meta does not sort this list.
+  const all = list.map((l) => l.loader?.version).filter(Boolean);
+  const stable = all.filter((v) => !/-(beta|pre|alpha|rc)/i.test(v));
+  const v = (stable.length ? stable : all).sort(compareVersions).pop();
+  if (!v) throw new Error('No Quilt loader for this Minecraft version');
+  return v;
+}
+
+export function quiltInstallArgs(mc: string, loader: string): string[] {
+  return ['-jar', 'quilt-installer.jar', 'install', 'server', mc, loader, '--download-server', '--install-dir=.'];
+}
+
+export const quiltLoaderJarUrl = (loader: string) => `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/${loader}/quilt-loader-${loader}.jar`;
+
+export async function quiltLoaderFor(mc: string, pinned?: string): Promise<string> {
+  return pickQuiltLoader(await fetchJson<any[]>(`${QUILT_META}/versions/loader/${encodeURIComponent(mc)}`), pinned);
+}
+
+export async function quiltInstallerUrl(): Promise<{ url: string; version: string }> {
+  const list = await fetchJson<{ version: string; url?: string }[]>(`${QUILT_META}/versions/installer`);
+  const version = list[0]?.version;
+  if (!version) throw new Error('Could not find the Quilt installer');
+  return { version, url: `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/${version}/quilt-installer-${version}.jar` };
 }
 
 /* ---------------- Forge ---------------- */
@@ -131,10 +178,26 @@ async function forgeVersions(): Promise<string[]> {
   for (const k of Object.keys(p.promos)) set.add(k.replace(/-(recommended|latest)$/, ''));
   return [...set].sort(compareVersions).reverse();
 }
-export async function forgeInstallerUrl(mcVersion: string): Promise<{ url: string; forgeVersion: string }> {
+/** `all` holds full Maven versions ("1.20.1-47.3.0"); only consulted when a version is pinned. */
+export function pickForgeVersion(promos: Record<string, string>, all: string[], mc: string, pinned?: string): string {
+  if (pinned) {
+    if (!all.some((v) => v === `${mc}-${pinned}` || v.startsWith(`${mc}-${pinned}-`))) throw new Error(`No Forge ${pinned} for Minecraft ${mc}`);
+    return pinned;
+  }
+  const fv = promos[`${mc}-recommended`] || promos[`${mc}-latest`];
+  if (!fv) throw new Error(`No Forge build for ${mc}`);
+  return fv;
+}
+
+const forgeAll = () =>
+  cached('forge-all', TTL, async () => {
+    const xml = await fetchText('https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml');
+    return [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map((m) => m[1]);
+  });
+
+export async function forgeInstallerUrl(mcVersion: string, pinned?: string): Promise<{ url: string; forgeVersion: string }> {
   const p = await forgePromos();
-  const fv = p.promos[`${mcVersion}-recommended`] || p.promos[`${mcVersion}-latest`];
-  if (!fv) throw new Error(`No Forge build for ${mcVersion}`);
+  const fv = pickForgeVersion(p.promos, pinned ? await forgeAll() : [], mcVersion, pinned);
   // Some old versions have an extra suffix (e.g. 1.7.10-10.13.4.1614-1.7.10)
   const full = `${mcVersion}-${fv}`;
   return {
@@ -174,12 +237,20 @@ async function neoforgeVersions(): Promise<string[]> {
   }
   return [...set].sort(compareVersions).reverse();
 }
-export async function neoforgeInstallerUrl(mcVersion: string): Promise<{ url: string; neoVersion: string }> {
-  const all = await neoforgeAll();
-  const candidates = all.filter((v) => neoToMc(v) === mcVersion);
+export function pickNeoForgeVersion(all: string[], mc: string, pinned?: string): string {
+  if (pinned) {
+    if (!all.includes(pinned) || neoToMc(pinned) !== mc) throw new Error(`No NeoForge ${pinned} for Minecraft ${mc}`);
+    return pinned;
+  }
+  const candidates = all.filter((v) => neoToMc(v) === mc);
   const stable = candidates.filter((v) => !/beta|alpha/i.test(v));
   const pick = (stable.length ? stable : candidates).sort(compareVersions).pop();
-  if (!pick) throw new Error(`No NeoForge build for ${mcVersion}`);
+  if (!pick) throw new Error(`No NeoForge build for ${mc}`);
+  return pick;
+}
+
+export async function neoforgeInstallerUrl(mcVersion: string, pinned?: string): Promise<{ url: string; neoVersion: string }> {
+  const pick = pickNeoForgeVersion(await neoforgeAll(), mcVersion, pinned);
   return {
     url: `https://maven.neoforged.net/releases/net/neoforged/neoforge/${pick}/neoforge-${pick}-installer.jar`,
     neoVersion: pick,
@@ -206,6 +277,10 @@ export async function listJavaVersions(type: JavaType): Promise<VersionList> {
       }
       case 'FABRIC': {
         const { versions, snapshots } = await fabricVersions();
+        return { type, versions, latest: versions[0] ?? null, snapshots: snapshots.slice(0, 30) };
+      }
+      case 'QUILT': {
+        const { versions, snapshots } = await quiltVersions();
         return { type, versions, latest: versions[0] ?? null, snapshots: snapshots.slice(0, 30) };
       }
       case 'FORGE': {
