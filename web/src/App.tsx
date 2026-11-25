@@ -1,3 +1,4 @@
+import { ApiAccess } from './pages/ApiAccess';
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { api } from './lib/api';
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="ports" element={<Ports />} />
         <Route path="storage" element={<Storage />} />
         <Route path="system" element={<System />} />
+        <Route path="api-access" element={<ApiAccess />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

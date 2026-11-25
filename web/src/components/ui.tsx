@@ -50,7 +50,7 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
   );
 }
 
-export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, footer, wide, xwide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; xwide?: boolean }) {
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -60,7 +60,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={clsx('card fade-up w-full', wide ? 'max-w-3xl' : 'max-w-lg')}>
+      <div className={clsx('card fade-up w-full', xwide ? 'max-w-5xl' : wide ? 'max-w-3xl' : 'max-w-lg')}>
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <h3 className="text-base font-semibold tracking-tight">{title}</h3>
           <button className="btn-ghost btn-sm" onClick={onClose} aria-label="Close">

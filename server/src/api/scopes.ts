@@ -19,7 +19,7 @@ export interface ScopeInfo {
 export const SCOPES: ScopeInfo[] = [
   { id: 'servers:read', group: 'Servers', label: 'See servers', description: 'List servers with their status, version, address, players online and CPU/memory use.', risk: 'harmless', examples: ['GET /api/v1/servers', 'GET /api/v1/servers/{id}'] },
   { id: 'servers:power', group: 'Servers', label: 'Start and stop', description: 'Start, stop, restart or force-kill servers.', risk: 'changes', examples: ['POST /api/v1/servers/{id}/start', 'POST /api/v1/servers/{id}/restart'] },
-  { id: 'servers:settings', group: 'Servers', label: 'Change settings', description: 'Server settings, server.properties, ports and live world controls (time, weather, rules).', risk: 'changes', examples: ['PATCH /api/servers/{id}', 'PUT /api/servers/{id}/properties'] },
+  { id: 'servers:settings', group: 'Servers', label: 'Change settings', description: 'Read and change server settings and server.properties (which can hold the RCON password), ports and live world controls (time, weather, rules).', risk: 'changes', examples: ['PATCH /api/servers/{id}', 'PUT /api/servers/{id}/properties'] },
   { id: 'servers:versions', group: 'Servers', label: 'Change versions', description: 'Change the Minecraft version or server type, reinstall, and apply server updates.', risk: 'changes', examples: ['POST /api/servers/{id}/updates/apply', 'POST /api/servers/{id}/reinstall'] },
   { id: 'servers:create', group: 'Servers', label: 'Create servers', description: 'Create new servers, import worlds and prepare modpacks for new servers.', risk: 'changes', global: true, examples: ['POST /api/servers', 'POST /api/modpacks/stage'] },
   { id: 'servers:delete', group: 'Servers', label: 'Delete servers', description: 'Delete servers, optionally with all their files and worlds.', risk: 'destructive', examples: ['DELETE /api/servers/{id}'] },
@@ -71,7 +71,8 @@ export const ROUTE_SCOPES: Record<string, string> = {
   'POST /api/servers/:id/kill': 'servers:power',
   'POST /api/servers/:id/ports': 'servers:settings',
   'POST /api/servers/:id/ports/release': 'servers:settings',
-  'GET /api/servers/:id/properties': 'servers:read',
+  // server.properties can hold secrets (rcon.password), so reading it needs the settings permission.
+  'GET /api/servers/:id/properties': 'servers:settings',
   'PUT /api/servers/:id/properties': 'servers:settings',
   'GET /api/servers/:id/world': 'servers:read',
   'POST /api/servers/:id/world': 'servers:settings',

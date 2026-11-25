@@ -350,3 +350,49 @@ export interface StorageOverview {
   imports: { id: string; name: string; edition: Edition; bytes: number; createdAt: string }[];
   playit: number;
 }
+
+/* ---- API access ---- */
+export type ApiRisk = 'harmless' | 'sensitive' | 'changes' | 'destructive';
+export interface ApiScope {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  risk: ApiRisk;
+  global?: boolean;
+  examples: string[];
+}
+export interface ApiPreset {
+  id: string;
+  label: string;
+  description: string;
+  scopes: string[];
+}
+export interface ApiTokenView {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  servers?: string[];
+  expiresAt?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  lastUsedIp?: string;
+  expired: boolean;
+}
+export interface ApiActivity {
+  at: string;
+  method: string;
+  path: string;
+  status: number;
+  ip?: string;
+}
+export interface ApiEndpoint {
+  method: 'GET' | 'POST';
+  path: string;
+  scope?: string;
+  summary: string;
+  body?: Record<string, unknown>;
+  query?: Record<string, string>;
+  websocket?: boolean;
+}
