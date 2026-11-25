@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { CancelledError, downloads, type DownloadCtx, type DownloadManager, type Progress } from '../downloads.js';
+import { CancelledError, downloads, fileHash, type DownloadCtx, type DownloadManager, type Progress } from '../downloads.js';
 import { PropertiesFile } from '../util.js';
 import { jarIsClientOnly } from './clientOnly.js';
 import { classifyOverride, readMrpack, safeTarget, type MrpackFile } from './mrpack.js';
@@ -55,10 +55,27 @@ const sha1 = (b: Buffer) => crypto.createHash('sha1').update(b).digest('hex');
 const isJar = (p: string) => /\.jar$/i.test(p);
 
 /** Download one pack file, trying each listed URL in turn (one job in the downloads panel). */
+/** Pack files ride out longer network blips than one-off downloads: a 100-file pack should not die on one hiccup. */
+export const PACK_BACKOFF_MS = [2_000, 8_000, 20_000, 45_000];
+
+/** True when `full` already holds this pack file (a retried install keeps what it finished last time). */
+async function alreadyHave(f: MrpackFile, full: string): Promise<boolean> {
+  const algo = f.hashes.sha512 ? 'sha512' : f.hashes.sha1 ? 'sha1' : null;
+  if (!algo) return false;
+  try {
+    const st = await fsp.stat(full);
+    if (f.fileSize && st.size !== f.fileSize) return false;
+    return (await fileHash(full, algo)) === f.hashes[algo]!.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 export async function downloadPackFile(f: MrpackFile, dest: string, ctx: DownloadCtx, m: DownloadManager): Promise<void> {
   const [url, ...mirrors] = f.downloads;
   if (!url) throw new Error(`No download URL for ${f.path}`);
-  await m.download(url, dest, { ...ctx, mirrors, label: path.basename(f.path), sha512: f.hashes.sha512, sha1: f.hashes.sha512 ? undefined : f.hashes.sha1, expectedSize: f.fileSize || undefined });
+  if (await alreadyHave(f, dest)) return;
+  await m.download(url, dest, { backoffMs: PACK_BACKOFF_MS, ...ctx, mirrors, label: path.basename(f.path), sha512: f.hashes.sha512, sha1: f.hashes.sha512 ? undefined : f.hashes.sha1, expectedSize: f.fileSize || undefined });
 }
 
 /** True when a pack file should be dropped because its own metadata says client-only and the admin did not insist. */
@@ -92,7 +109,8 @@ export async function installPackFiles(
   const total = wanted.length + overrides.length;
   const tick = (what: string) => onProgress(total ? Math.round((++done / total) * 100) : 100, what);
 
-  await Promise.all(
+  // Every file gets its chance: one that fails doesn't cancel the rest, so a retry only fetches what's missing.
+  const results = await Promise.allSettled(
     wanted.map(async (f) => {
       const full = await safeTarget(root, f.path);
       await downloadPackFile(f, full, ctx, m);
@@ -100,6 +118,13 @@ export async function installPackFiles(
       tick(`Downloaded ${path.basename(f.path)}`);
     }),
   );
+  const failed = results.flatMap((r, i) => (r.status === 'rejected' ? [{ f: wanted[i], e: r.reason as Error }] : []));
+  if (failed.some((x) => x.e instanceof CancelledError) || ctx.signal?.aborted) throw new CancelledError();
+  if (failed.length) {
+    for (const x of failed) opts.log?.(`[Blockhost] Could not download ${x.f.path}: ${x.e.message}`);
+    const first = failed[0];
+    throw new Error(`${failed.length} of ${wanted.length} files could not be downloaded (first: ${path.basename(first.f.path)}: ${first.e.message}). Retry to fetch just those.`);
+  }
 
   const outOverrides: ManifestOverride[] = [];
   for (const o of overrides) {

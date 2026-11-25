@@ -107,3 +107,29 @@ test("the wizard's server.properties choices win over the pack's", async () => {
   assert.match(txt, /^difficulty=hard$/m);
   assert.match(txt, /^motd=From the pack$/m);
 });
+
+test('a file already on disk with the right hash is not downloaded again (retry resumes)', async () => {
+  const f = file('mods/kept.jar', 1010);
+  f.downloads = [`${fx.url}/status/404`];
+  const p = await pack([f]);
+  await fsp.mkdir(path.join(p.root, 'mods'), { recursive: true });
+  await fsp.writeFile(path.join(p.root, 'mods/kept.jar'), fixtureBytes(1010));
+  const r = await run(p);
+  assert.deepEqual(r.files.map((x) => x.path), ['mods/kept.jar']);
+});
+
+test('a file on disk with the wrong content is downloaded again', async () => {
+  const p = await pack([file('mods/stale.jar', 1011)]);
+  await fsp.mkdir(path.join(p.root, 'mods'), { recursive: true });
+  await fsp.writeFile(path.join(p.root, 'mods/stale.jar'), 'old');
+  await run(p);
+  assert.deepEqual(await fsp.readFile(path.join(p.root, 'mods/stale.jar')), fixtureBytes(1011));
+});
+
+test('one failed file does not stop the others; the error says how many failed', async () => {
+  const bad = file('mods/bad.jar', 1012);
+  bad.downloads = [`${fx.url}/status/404`];
+  const p = await pack([bad, file('mods/good.jar', 1013)]);
+  await assert.rejects(run(p), /1 of 2 files could not be downloaded/);
+  assert.deepEqual(await fsp.readFile(path.join(p.root, 'mods/good.jar')), fixtureBytes(1013));
+});

@@ -108,6 +108,8 @@ export interface ServerSummary extends ServerRecord {
   ping: PingResult | null;
   geyserPing: PingResult | null;
   lastExit: { code: number | null; signal: string | null; at: string; oom: boolean } | null;
+  /** Why the server is in the error or crashed state (e.g. why its install failed). */
+  error: string | null;
   diskBytes: number;
   lastStats: StatsSample | null;
   install: { pct: number | null; message: string } | null;

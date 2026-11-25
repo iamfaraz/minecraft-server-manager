@@ -45,6 +45,17 @@ export function ServerPage() {
     );
   if (!s) return <Navigate to="/" replace />;
 
+  const retryInstall = async () => {
+    setBusy('retry');
+    try {
+      await api.post(`/api/servers/${s.id}/reinstall`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const act = async (action: 'start' | 'stop' | 'restart' | 'kill') => {
     setBusy(action);
     try {
@@ -131,12 +142,22 @@ export function ServerPage() {
         <div className="fade-up flex items-start gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <div>
-            <p className="font-medium">{s.state === 'crashed' ? 'The server crashed' : 'Something went wrong'}</p>
+            <p className="font-medium">{s.state === 'crashed' ? 'The server crashed' : !s.installed ? 'The install did not finish' : 'Something went wrong'}</p>
+            {s.error && <p className="break-words font-mono text-xs text-rose-100">{s.error}</p>}
             <p className="text-rose-200/80">
-              {s.lastExit?.oom ? 'The process ran out of memory. Raise -Xmx or the container memory limit, and make sure the sum of all heaps leaves headroom.' : 'Check the console for details.'}
+              {s.lastExit?.oom
+                ? 'The process ran out of memory. Raise -Xmx or the container memory limit, and make sure the sum of all heaps leaves headroom.'
+                : !s.installed
+                  ? 'Nothing is lost: retry once the problem is fixed. A network error is usually temporary. The console has the full log.'
+                  : 'Check the console for details.'}
               {s.lastExit && ` Exit code ${s.lastExit.code ?? 'n/a'}${s.lastExit.signal ? `, signal ${s.lastExit.signal}` : ''}.`}
             </p>
           </div>
+          {!s.installed && s.state === 'error' && (
+            <button className="btn-secondary btn-sm ml-auto shrink-0" disabled={busy !== null} onClick={retryInstall}>
+              {busy === 'retry' ? <Spinner /> : <RotateCw className="size-4" />} Retry install
+            </button>
+          )}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, ExternalLink, Globe2, Link2, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useServers } from '../hooks/useServers';
 import { api } from '../lib/api';
 import { copy } from '../lib/format';
@@ -10,7 +11,7 @@ import { Card, EmptyState, Spinner, Toggle } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { clsx } from 'clsx';
 
-const STATE_LABEL: Record<PlayitStatus['state'], { label: string; cls: string }> = {
+export const STATE_LABEL: Record<PlayitStatus['state'], { label: string; cls: string }> = {
   disabled: { label: 'Disabled', cls: 'border-white/10 bg-white/5 text-muted' },
   installing: { label: 'Installing agent', cls: 'border-sky-500/30 bg-sky-500/10 text-sky-300' },
   starting: { label: 'Starting', cls: 'border-amber-500/30 bg-amber-500/10 text-amber-300' },
@@ -175,7 +176,7 @@ export function RemotePlay() {
                       </td>
                       <td className="px-3 py-3 text-muted">{t.tunnelType || t.portType}</td>
                       <td className="px-3 py-3 text-muted">
-                        {srv ? <span className="text-ink">{srv.name}</span> : <span>127.0.0.1:{t.localPort}</span>}
+                        {srv ? <Link className="text-ink hover:text-accent hover:underline" to={`/servers/${srv.id}/settings`}>{srv.name}</Link> : <span>127.0.0.1:{t.localPort}</span>}
                         {srv && srv.geyser && srv.geyserPort === t.localPort && <span className="ml-1 text-xs">(Geyser)</span>}
                       </td>
                       <td className="px-3 py-3 text-right">

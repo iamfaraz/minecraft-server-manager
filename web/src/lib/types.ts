@@ -96,6 +96,7 @@ export interface ServerSummary {
   ping: PingResult | null;
   geyserPing: PingResult | null;
   lastExit: { code: number | null; signal: string | null; at: string; oom: boolean } | null;
+  error?: string | null;
   diskBytes: number;
   lastStats: StatsSample | null;
   install: { pct: number | null; message: string } | null;
@@ -146,6 +147,18 @@ export interface PlayitTunnel {
   active: boolean;
   disabledReason?: string | null;
 }
+export interface ServerPort {
+  kind: 'game' | 'geyser';
+  port: number;
+  protocol: 'tcp' | 'udp';
+  inUse: boolean;
+  tunnel: PlayitTunnel | null;
+}
+export interface ServerTunnels {
+  agent: { state: PlayitStatus['state']; enabled: boolean; claimUrl: string | null; error: string | null };
+  tunnelsError: string | null;
+  ports: ServerPort[];
+}
 export interface PlayitStatus {
   state: 'disabled' | 'installing' | 'starting' | 'claiming' | 'running' | 'stopped' | 'error';
   enabled: boolean;
@@ -192,6 +205,8 @@ export interface DownloadJob {
   attempt: number;
   indeterminate?: boolean;
   startedAt: string;
+  /** When bytes first moved (startedAt is when it was queued). */
+  activeAt?: string;
   finishedAt?: string;
 }
 export interface DownloadTask {
