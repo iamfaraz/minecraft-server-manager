@@ -120,7 +120,7 @@ test('cancelTask aborts all jobs in task', async () => {
   const t = m.startTask({ label: 'T', kind: 'server-install' });
   const ps = [m.download(`${fx.url}/slow/30001`, dest(), t.ctx), m.download(`${fx.url}/slow/30002`, dest(), t.ctx)];
   setTimeout(() => m.cancelTask(t.id), 150);
-  for (const p of ps) await assert.rejects(p, CancelledError);
+  await Promise.all(ps.map((p) => assert.rejects(p, CancelledError)));
   assert.equal(m.snapshot().tasks.find((x) => x.id === t.id)!.state, 'cancelled');
 });
 
