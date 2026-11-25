@@ -7,7 +7,7 @@ import {
   issueMfaToken,
   issueToken,
   regenerateRecoveryCodes,
-  requireAuth,
+  requireSession,
   setSessionCookie,
   setupAdmin,
   setupRequired,
@@ -67,21 +67,21 @@ export async function authRoutes(app: FastifyInstance) {
     return { ok: true, user };
   });
 
-  app.get('/api/auth/2fa', { preHandler: requireAuth }, async () => totpStatus());
-  app.post('/api/auth/2fa/setup', { preHandler: requireAuth }, async () => totpBeginSetup());
-  app.post<{ Body: { code: string } }>('/api/auth/2fa/confirm', { preHandler: requireAuth }, async (req) => ({ recoveryCodes: await totpConfirm(req.body?.code || '') }));
-  app.post<{ Body: { password: string; code: string } }>('/api/auth/2fa/disable', { preHandler: requireAuth }, async (req) => {
+  app.get('/api/auth/2fa', { preHandler: requireSession }, async () => totpStatus());
+  app.post('/api/auth/2fa/setup', { preHandler: requireSession }, async () => totpBeginSetup());
+  app.post<{ Body: { code: string } }>('/api/auth/2fa/confirm', { preHandler: requireSession }, async (req) => ({ recoveryCodes: await totpConfirm(req.body?.code || '') }));
+  app.post<{ Body: { password: string; code: string } }>('/api/auth/2fa/disable', { preHandler: requireSession }, async (req) => {
     await totpDisable(req.body?.password || '', req.body?.code || '');
     return { ok: true };
   });
-  app.post<{ Body: { code: string } }>('/api/auth/2fa/recovery-codes', { preHandler: requireAuth }, async (req) => ({ recoveryCodes: await regenerateRecoveryCodes(req.body?.code || '') }));
+  app.post<{ Body: { code: string } }>('/api/auth/2fa/recovery-codes', { preHandler: requireSession }, async (req) => ({ recoveryCodes: await regenerateRecoveryCodes(req.body?.code || '') }));
 
   app.post('/api/auth/logout', async (_req, reply) => {
     clearSessionCookie(reply);
     return { ok: true };
   });
 
-  app.post<{ Body: { current: string; next: string } }>('/api/auth/password', { preHandler: requireAuth }, async (req) => {
+  app.post<{ Body: { current: string; next: string } }>('/api/auth/password', { preHandler: requireSession }, async (req) => {
     await changePassword(req.body?.current || '', req.body?.next || '');
     return { ok: true };
   });
