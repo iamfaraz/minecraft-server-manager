@@ -167,7 +167,40 @@ export type WsEvent =
   | { type: 'backup.changed'; id: string }
   | { type: 'broadcast'; id: string; status: any }
   | { type: 'addon.progress'; id: string; key: string; pct: number | null; message: string; done?: boolean; error?: string; newFileName?: string }
+  | { type: 'download.changed'; job?: DownloadJob; task?: DownloadTask }
   | { type: 'pong' };
+
+/* ---- downloads ---- */
+export type DownloadState = 'queued' | 'active' | 'verifying' | 'done' | 'failed' | 'cancelled';
+export interface DownloadJob {
+  id: string;
+  url: string;
+  label: string;
+  kind: string;
+  serverId?: string;
+  taskId?: string;
+  bytesDone: number;
+  bytesTotal: number | null;
+  speedBps: number;
+  state: DownloadState;
+  error?: string;
+  attempt: number;
+  indeterminate?: boolean;
+  startedAt: string;
+  finishedAt?: string;
+}
+export interface DownloadTask {
+  id: string;
+  label: string;
+  serverId?: string;
+  kind: string;
+  state: 'active' | 'done' | 'failed' | 'cancelled';
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+  canRetry: boolean;
+  jobIds: string[];
+}
 
 /* ---- ports ---- */
 export type PortSlot = 'port' | 'geyserPort';
