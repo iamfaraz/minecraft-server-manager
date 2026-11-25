@@ -127,6 +127,41 @@ export async function fabricServerJarUrl(version: string, pinned?: string): Prom
   };
 }
 
+/* ---------------- Quilt ---------------- */
+const QUILT_META = 'https://meta.quiltmc.org/v3';
+
+async function quiltVersions(): Promise<{ versions: string[]; snapshots: string[] }> {
+  const d = await fetchJson<{ version: string; stable: boolean }[]>(`${QUILT_META}/versions/game`);
+  return { versions: d.filter((x) => x.stable).map((x) => x.version), snapshots: d.filter((x) => !x.stable).map((x) => x.version) };
+}
+
+export function pickQuiltLoader(list: { loader: { version: string } }[], pinned?: string): string {
+  if (pinned) {
+    if (!list.some((l) => l.loader?.version === pinned)) throw new Error(`No Quilt loader ${pinned} for this Minecraft version`);
+    return pinned;
+  }
+  const v = (list.find((l) => !/-(beta|pre|alpha)/i.test(l.loader?.version)) || list[0])?.loader?.version;
+  if (!v) throw new Error('No Quilt loader for this Minecraft version');
+  return v;
+}
+
+export function quiltInstallArgs(mc: string, loader: string): string[] {
+  return ['-jar', 'quilt-installer.jar', 'install', 'server', mc, loader, '--download-server', '--install-dir=.'];
+}
+
+export const quiltLoaderJarUrl = (loader: string) => `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/${loader}/quilt-loader-${loader}.jar`;
+
+export async function quiltLoaderFor(mc: string, pinned?: string): Promise<string> {
+  return pickQuiltLoader(await fetchJson<any[]>(`${QUILT_META}/versions/loader/${encodeURIComponent(mc)}`), pinned);
+}
+
+export async function quiltInstallerUrl(): Promise<{ url: string; version: string }> {
+  const list = await fetchJson<{ version: string; url?: string }[]>(`${QUILT_META}/versions/installer`);
+  const version = list[0]?.version;
+  if (!version) throw new Error('Could not find the Quilt installer');
+  return { version, url: `https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/${version}/quilt-installer-${version}.jar` };
+}
+
 /* ---------------- Forge ---------------- */
 interface ForgePromos {
   promos: Record<string, string>;
@@ -239,6 +274,10 @@ export async function listJavaVersions(type: JavaType): Promise<VersionList> {
       }
       case 'FABRIC': {
         const { versions, snapshots } = await fabricVersions();
+        return { type, versions, latest: versions[0] ?? null, snapshots: snapshots.slice(0, 30) };
+      }
+      case 'QUILT': {
+        const { versions, snapshots } = await quiltVersions();
         return { type, versions, latest: versions[0] ?? null, snapshots: snapshots.slice(0, 30) };
       }
       case 'FORGE': {

@@ -6,7 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useServers } from '../hooks/useServers';
 import { api } from '../lib/api';
 import { fmtMb } from '../lib/format';
-import { JAVA_TYPES, TYPE_BLURB, TYPE_LABEL, type BackupMeta, type Edition, type JavaType, type ServerType, type SystemInfo } from '../lib/types';
+import { GEYSER_TYPES, JAVA_TYPES, TYPE_BLURB, TYPE_LABEL, type BackupMeta, type Edition, type JavaType, type ServerType, type SystemInfo } from '../lib/types';
 import { Field, Segmented, Spinner, Toggle } from '../components/ui';
 import { useToast } from '../components/Toast';
 import { fmtBytes } from '../lib/format';
@@ -45,7 +45,7 @@ interface Form {
   pvp: boolean;
 }
 
-const GEYSER_OK: ServerType[] = ['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'];
+const GEYSER_OK: ServerType[] = GEYSER_TYPES;
 
 export function NewServer() {
   const nav = useNavigate();

@@ -9,6 +9,10 @@ import {
   neoforgeInstallerUrl,
   paperDownloadUrl,
   purpurDownloadUrl,
+  quiltInstallArgs,
+  quiltInstallerUrl,
+  quiltLoaderFor,
+  quiltLoaderJarUrl,
   requiredJavaMajor,
   vanillaServerUrl,
 } from '../versions/java.js';
@@ -21,9 +25,11 @@ export async function javaMajorFor(rec: ServerRecord): Promise<number> {
 }
 
 async function cleanOldBinaries(root: string): Promise<void> {
-  const names = ['server.jar', 'fabric-server-launch.jar', 'forge-installer.jar', 'neoforge-installer.jar', 'run.sh', 'run.bat', 'installer.jar.log'];
+  const names = ['server.jar', 'fabric-server-launch.jar', 'quilt-server-launch.jar', 'quilt-installer.jar', 'forge-installer.jar', 'neoforge-installer.jar', 'run.sh', 'run.bat', 'installer.jar.log'];
   for (const n of names) await fsp.rm(path.join(root, n), { force: true });
   await fsp.rm(path.join(root, '.fabric'), { recursive: true, force: true });
+  await fsp.rm(path.join(root, '.quilt'), { recursive: true, force: true });
+  await fsp.rm(path.join(root, 'libraries', 'org', 'quiltmc'), { recursive: true, force: true });
   await fsp.rm(path.join(root, 'libraries', 'net', 'minecraftforge', 'forge'), { recursive: true, force: true });
   await fsp.rm(path.join(root, 'libraries', 'net', 'neoforged', 'neoforge'), { recursive: true, force: true });
   let entries: string[] = [];
@@ -143,6 +149,19 @@ export async function installJava(rec: ServerRecord, root: string, onProgress: P
       launch = { kind: 'jar', jar: 'fabric-server-launch.jar' };
       break;
     }
+    case 'QUILT': {
+      loaderVersion = await quiltLoaderFor(rec.version, pin);
+      downloadUrl = quiltLoaderJarUrl(loaderVersion);
+      const installer = await quiltInstallerUrl();
+      const f = await downloadCached(installer.url, onProgress, `-quilt-installer-${installer.version}.jar`, ctx);
+      const inst = path.join(root, 'quilt-installer.jar');
+      await fsp.copyFile(f, inst);
+      await runInstaller(rt.path, root, quiltInstallArgs(rec.version, loaderVersion), onProgress, ctx, 'Quilt installer');
+      await fsp.rm(inst, { force: true });
+      if (!(await exists(path.join(root, 'quilt-server-launch.jar')))) throw new Error('Quilt installer finished but quilt-server-launch.jar is missing');
+      launch = { kind: 'jar', jar: 'quilt-server-launch.jar' };
+      break;
+    }
     case 'FORGE': {
       const info = await forgeInstallerUrl(rec.version, pin);
       downloadUrl = info.url;
@@ -217,7 +236,7 @@ export function extensionDir(rec: ServerRecord): 'plugins' | 'mods' | null {
 /** Download Geyser + Floodgate (and Fabric API on Fabric) into the extension directory. */
 export async function installGeyser(rec: ServerRecord, root: string, onProgress: Progress, ctx?: DownloadCtx): Promise<void> {
   const dir = extensionDir(rec);
-  if (!dir || rec.type === 'FORGE') throw new Error('Geyser is supported on Paper, Purpur, Fabric and NeoForge servers');
+  if (!dir || rec.type === 'FORGE') throw new Error('Geyser is supported on Paper, Purpur, Fabric, Quilt and NeoForge servers');
   const platform = dir === 'plugins' ? 'spigot' : rec.type === 'NEOFORGE' ? 'neoforge' : 'fabric';
   const target = path.join(root, dir);
   await fsp.mkdir(target, { recursive: true });
@@ -231,7 +250,7 @@ export async function installGeyser(rec: ServerRecord, root: string, onProgress:
     if (e instanceof CancelledError) throw e;
     onProgress(null, `Floodgate not available for ${platform} (${(e as Error).message}); Geyser installed without it`);
   }
-  if (rec.type === 'FABRIC') {
+  if (rec.type === 'FABRIC' || rec.type === 'QUILT') {
     onProgress(null, 'Downloading Fabric API');
     const versions = await fetchJson<any[]>(
       `https://api.modrinth.com/v2/project/fabric-api/version?loaders=${encodeURIComponent('["fabric"]')}&game_versions=${encodeURIComponent(JSON.stringify([rec.version]))}`,

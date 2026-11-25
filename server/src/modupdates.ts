@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
 import { CancelledError, downloads, withTask } from './downloads.js';
+import { quiltInstallerUrl } from './versions/java.js';
+import { TYPE_NAMES } from './servers/types.js';
 import { fetchJson, downloadTo, exists, readJson, rmrf, run, which, writeJson, bad, notFound, HttpError, fmtBytes } from './util.js';
 import { extensionDir } from './install/java.js';
 import type { ServerInstance } from './servers/instance.js';
@@ -20,6 +22,7 @@ const LOADERS: Record<string, string[]> = {
   PAPER: ['paper', 'spigot', 'bukkit'],
   PURPUR: ['purpur', 'paper', 'spigot', 'bukkit'],
   FABRIC: ['fabric'],
+  QUILT: ['quilt', 'fabric'],
   FORGE: ['forge'],
   NEOFORGE: ['neoforge'],
 };
@@ -258,6 +261,10 @@ async function loaderInstaller(inst: ServerInstance): Promise<{ url: string; fil
       if (!v) return null;
       return { url: `https://maven.fabricmc.net/net/fabricmc/fabric-installer/${v}/fabric-installer-${v}.jar`, fileName: `fabric-installer-${v}.jar`, label: `Fabric installer ${v} (choose Minecraft ${mc}${lv ? `, loader ${lv}` : ''})` };
     }
+    case 'QUILT': {
+      const q = await quiltInstallerUrl();
+      return { url: q.url, fileName: `quilt-installer-${q.version}.jar`, label: `Quilt installer ${q.version} (choose Minecraft ${mc}${lv ? `, loader ${lv}` : ''})` };
+    }
     case 'FORGE':
       if (!lv) return null;
       return { url: `https://maven.minecraftforge.net/net/minecraftforge/forge/${mc}-${lv}/forge-${mc}-${lv}-installer.jar`, fileName: `forge-${mc}-${lv}-installer.jar`, label: `Forge ${lv} installer for Minecraft ${mc}` };
@@ -274,7 +281,7 @@ export async function buildClientPack(
   opts: { files: string[]; includeInstaller: boolean; serverAddress?: string },
   log?: (m: string) => void,
 ): Promise<ClientPackMeta> {
-  if (!MOD_TYPES.includes(inst.rec.type)) throw bad('Client packs are only meaningful for modded (Fabric/Forge/NeoForge) servers');
+  if (!MOD_TYPES.includes(inst.rec.type)) throw bad('Client packs are only meaningful for modded (Fabric/Quilt/Forge/NeoForge) servers');
   const dir = extensionDir(inst.rec)!;
   const files = [...new Set(opts.files)].filter((f) => /^[^/\\]+\.jar$/i.test(f));
   if (!files.length) throw bad('Select at least one mod');
@@ -298,12 +305,12 @@ export async function buildClientPack(
       }
     }
     progress(inst.id, 'client-pack', null, 'Compressing');
-    const loaderName = inst.rec.type === 'FABRIC' ? 'Fabric' : inst.rec.type === 'FORGE' ? 'Forge' : 'NeoForge';
+    const loaderName = TYPE_NAMES[inst.rec.type];
     const readme = [
       `${inst.rec.name} — client mods for Minecraft ${inst.rec.version} (${loaderName})`,
       '',
       `1. Install ${loaderName} for Minecraft ${inst.rec.version}${inst.rec.build?.loaderVersion ? ` (loader ${inst.rec.build.loaderVersion})` : ''}.`,
-      installerLabel ? `   The installer is in the installer/ folder: ${installerLabel}. Run it with Java and choose "Client".` : `   Download the installer from ${inst.rec.type === 'FABRIC' ? 'https://fabricmc.net/use/installer/' : inst.rec.type === 'FORGE' ? 'https://files.minecraftforge.net/' : 'https://neoforged.net/'}.`,
+      installerLabel ? `   The installer is in the installer/ folder: ${installerLabel}. Run it with Java and choose "Client".` : `   Download the installer from ${({ FABRIC: 'https://fabricmc.net/use/installer/', QUILT: 'https://quiltmc.org/en/install/', FORGE: 'https://files.minecraftforge.net/' } as Record<string, string>)[inst.rec.type] ?? 'https://neoforged.net/'}.`,
       '2. Copy everything from the mods/ folder into your .minecraft/mods folder',
       '   Windows: %APPDATA%\\.minecraft\\mods   macOS: ~/Library/Application Support/minecraft/mods   Linux: ~/.minecraft/mods',
       `3. Launch the ${loaderName} profile in the Minecraft launcher.`,

@@ -12,7 +12,7 @@ import { ServerInstance } from './instance.js';
 import { pingBedrock, pingJava, probeNetherNet } from './status.js';
 import { heldPorts, portNeeds, slotSpan, type PortConflict, type PortNeed, type PortSlot } from './ports.js';
 import type { CreateServerInput, ServerRecord, ServerSummary, ServerType, JavaSettings } from './types.js';
-import { JAVA_TYPES, TYPE_NAMES } from './types.js';
+import { GEYSER_TYPES, JAVA_TYPES, TYPE_NAMES } from './types.js';
 import { CancelledError, downloads, type DownloadCtx } from '../downloads.js';
 import { applyRetention, backupFile, createBackup, extractWorld, listBackups, worldDirs } from '../backups.js';
 import { applyImport, getImport } from '../imports.js';
@@ -413,7 +413,7 @@ export class ServerManager {
             extraArgs: input.java?.extraArgs ?? '',
           }
         : undefined;
-    const geyser = edition === 'java' && !!input.geyser && ['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(input.type);
+    const geyser = edition === 'java' && !!input.geyser && GEYSER_TYPES.includes(input.type);
     const rec: ServerRecord = {
       id,
       name: input.name.trim(),
@@ -564,7 +564,7 @@ export class ServerManager {
       needsRestart.push('java');
     }
     if (rec.edition === 'java' && patch.geyser !== undefined && !!patch.geyser !== rec.geyser) {
-      if (!['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric or NeoForge');
+      if (!GEYSER_TYPES.includes(rec.type)) throw bad('Geyser requires Paper, Purpur, Fabric, Quilt or NeoForge');
       rec.geyser = !!patch.geyser;
       if (rec.geyser) {
         rec.geyserPort = patch.geyserPort || rec.geyserPort || this.allocatePort('udp', id, 2);

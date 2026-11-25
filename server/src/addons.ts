@@ -80,6 +80,7 @@ const LOADERS: Record<string, string[]> = {
   PAPER: ['paper', 'spigot', 'bukkit'],
   PURPUR: ['purpur', 'paper', 'spigot', 'bukkit'],
   FABRIC: ['fabric'],
+  QUILT: ['quilt', 'fabric'],
   FORGE: ['forge'],
   NEOFORGE: ['neoforge'],
 };

@@ -10,10 +10,11 @@
  */
 import type { ServerInstance } from './servers/instance.js';
 import { bedrockVersions } from './versions/bedrock.js';
+import { quiltLoaderFor, quiltLoaderJarUrl } from './versions/java.js';
 import { fabricServerJarUrl, forgeInstallerUrl, listJavaVersions, neoforgeInstallerUrl, paperDownloadUrl, vanillaServerUrl } from './versions/java.js';
-import type { JavaType } from './servers/types.js';
+import { TYPE_NAMES, type JavaType } from './servers/types.js';
 
-const NAMES: Record<string, string> = { VANILLA: 'Vanilla', PAPER: 'Paper', PURPUR: 'Purpur', FABRIC: 'Fabric', FORGE: 'Forge', NEOFORGE: 'NeoForge', BEDROCK: 'Bedrock' };
+const NAMES: Record<string, string> = TYPE_NAMES;
 
 export interface UpdateCheck {
   checkedAt: string;
@@ -38,6 +39,10 @@ async function latestBuild(inst: ServerInstance): Promise<{ url: string; label: 
     case 'FABRIC': {
       const info = await fabricServerJarUrl(rec.version);
       return { url: info.url, label: `loader ${info.loader}` };
+    }
+    case 'QUILT': {
+      const loader = await quiltLoaderFor(rec.version);
+      return { url: quiltLoaderJarUrl(loader), label: `loader ${loader}` };
     }
     case 'FORGE': {
       const info = await forgeInstallerUrl(rec.version);

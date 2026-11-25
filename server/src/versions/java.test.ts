@@ -21,3 +21,10 @@ const neo = ['21.1.70', '21.1.77', '21.1.80-beta', '20.4.237'];
 test('pickNeoForgeVersion returns newest stable when unpinned', () => assert.equal(pickNeoForgeVersion(neo, '1.21.1'), '21.1.77'));
 test('pickNeoForgeVersion returns pinned', () => assert.equal(pickNeoForgeVersion(neo, '1.21.1', '21.1.70'), '21.1.70'));
 test('pickNeoForgeVersion throws for unknown pinned', () => assert.throws(() => pickNeoForgeVersion(neo, '1.21.1', '21.1.1'), /No NeoForge 21\.1\.1/));
+
+import { pickQuiltLoader, quiltInstallArgs } from './java.js';
+test('quiltInstallArgs builds server install command', () =>
+  assert.deepEqual(quiltInstallArgs('1.21.1', '0.27.1'), ['-jar', 'quilt-installer.jar', 'install', 'server', '1.21.1', '0.27.1', '--download-server', '--install-dir=.']));
+const quilt = [{ loader: { version: '0.28.0-beta.1' } }, { loader: { version: '0.27.1' } }, { loader: { version: '0.26.4' } }];
+test('pickQuiltLoader skips beta when unpinned', () => assert.equal(pickQuiltLoader(quilt), '0.27.1'));
+test('pickQuiltLoader returns pinned', () => assert.equal(pickQuiltLoader(quilt, '0.26.4'), '0.26.4'));

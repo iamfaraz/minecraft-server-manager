@@ -10,6 +10,7 @@ import { ProgressBar } from '../../components/ui';
 import { api } from '../../lib/api';
 import { fmtBytes } from '../../lib/format';
 import type { ServerSummary } from '../../lib/types';
+import { MOD_TYPES, TYPE_LABEL } from '../../lib/types';
 import { Card, EmptyState, Spinner } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
@@ -248,11 +249,11 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
           {!checked || !report ? (
             <p className="text-sm text-muted">Run <span className="text-ink">Check for updates</span> first. Mods are then sorted into ones players must install on their own game (for example Fabric API or content mods), optional client additions, and server-only mods.</p>
           ) : !clientMods.length ? (
-            <p className="text-sm text-muted">None of the installed mods need to be on the client. Players only need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}.</p>
+            <p className="text-sm text-muted">None of the installed mods need to be on the client. Players only need {TYPE_LABEL[s.type]} for Minecraft {s.version}.</p>
           ) : (
             <div className="space-y-4">
               <p className="text-sm text-muted">
-                Players need {s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} for Minecraft {s.version}
+                Players need {TYPE_LABEL[s.type]} for Minecraft {s.version}
                 {s.build?.loaderVersion ? ` (loader ${s.build.loaderVersion})` : ''} plus the mods marked <span className="text-amber-300">needed on client</span>. Pick what to bundle; the zip includes a README with install steps{includeInstaller ? ' and the loader installer' : ''}.
               </p>
               <ul className="divide-y divide-line/60 rounded-xl border border-line">
@@ -265,7 +266,7 @@ function ModTools({ s, isMods }: { s: ServerSummary; isMods: boolean }) {
                   </li>
                 ))}
               </ul>
-              <Toggle checked={includeInstaller} onChange={setIncludeInstaller} label={`Include the ${s.type === 'FABRIC' ? 'Fabric' : s.type === 'FORGE' ? 'Forge' : 'NeoForge'} installer`} description="Downloaded from the official Maven so players can set up the loader offline." />
+              <Toggle checked={includeInstaller} onChange={setIncludeInstaller} label={`Include the ${TYPE_LABEL[s.type]} installer`} description="Downloaded from the official Maven so players can set up the loader offline." />
               <div className="flex flex-wrap items-center gap-2">
                 <button className="btn-primary" disabled={build.isPending || !effectiveSelected.size} onClick={() => build.mutate()}>
                   {build.isPending ? <Spinner /> : <Download className="size-4" />} Build &amp; download client pack ({effectiveSelected.size})
@@ -386,7 +387,7 @@ export function Addons({ s }: { s: ServerSummary }) {
       </div>
     );
 
-  const isMods = java && ['FABRIC', 'FORGE', 'NEOFORGE'].includes(s.type);
+  const isMods = java && MOD_TYPES.includes(s.type);
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-2">
       {java && <ModTools s={s} isMods={isMods} />}

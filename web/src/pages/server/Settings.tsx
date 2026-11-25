@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { fmtMb } from '../../lib/format';
 import type { ServerSummary, SystemInfo } from '../../lib/types';
+import { GEYSER_TYPES } from '../../lib/types';
 import { Card, ConfirmModal, Field, Segmented, Spinner, Toggle } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { ConsoleBroadcast } from './ConsoleBroadcast';
@@ -95,7 +96,7 @@ export function Settings({ s }: { s: ServerSummary }) {
   });
 
   const memCap = sys?.memory.limitMb || sys?.memory.totalMb || 0;
-  const geyserOk = ['PAPER', 'PURPUR', 'FABRIC', 'NEOFORGE'].includes(s.type);
+  const geyserOk = GEYSER_TYPES.includes(s.type);
 
   return (
     <div className="fade-up grid gap-5 lg:grid-cols-2">

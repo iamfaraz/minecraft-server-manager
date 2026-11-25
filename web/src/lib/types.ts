@@ -1,17 +1,20 @@
 export type Edition = 'java' | 'bedrock';
-export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'FORGE' | 'NEOFORGE';
+export type JavaType = 'VANILLA' | 'PAPER' | 'PURPUR' | 'FABRIC' | 'QUILT' | 'FORGE' | 'NEOFORGE';
 export type ServerType = JavaType | 'BEDROCK';
 export type ServerState = 'stopped' | 'installing' | 'starting' | 'running' | 'stopping' | 'crashed' | 'error';
 export type JvmPreset = 'aikar' | 'zgc' | 'none';
 export type BackupSchedule = 'off' | 'hourly' | '6h' | 'daily';
 export type BackupScope = 'world' | 'full';
 
-export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'FORGE', 'NEOFORGE'];
+export const JAVA_TYPES: JavaType[] = ['VANILLA', 'PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
+export const MOD_TYPES: ServerType[] = ['FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'];
+export const GEYSER_TYPES: ServerType[] = ['PAPER', 'PURPUR', 'FABRIC', 'QUILT', 'NEOFORGE'];
 export const TYPE_LABEL: Record<ServerType, string> = {
   VANILLA: 'Vanilla',
   PAPER: 'Paper',
   PURPUR: 'Purpur',
   FABRIC: 'Fabric',
+  QUILT: 'Quilt',
   FORGE: 'Forge',
   NEOFORGE: 'NeoForge',
   BEDROCK: 'Bedrock',
@@ -21,6 +24,7 @@ export const TYPE_BLURB: Record<ServerType, string> = {
   PAPER: 'High-performance fork with plugin support. Best default.',
   PURPUR: 'Paper fork with extra gameplay toggles.',
   FABRIC: 'Lightweight mod loader for modern versions.',
+  QUILT: 'Fabric-compatible mod loader; runs most Fabric mods.',
   FORGE: 'Classic mod loader with the largest mod library.',
   NEOFORGE: 'Modern Forge successor for 1.20.2+.',
   BEDROCK: 'Official Bedrock Dedicated Server for phones, consoles and Windows 10/11.',
